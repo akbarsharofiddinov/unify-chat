@@ -1,0 +1,99 @@
+.chat_menu {
+  display: flex;
+  flex-direction: column;
+  margin-top: 12px;
+
+  .user_box {
+    display: flex;
+    align-items: start;
+    gap: 8px;
+    padding: 12px 16px;
+    cursor: pointer;
+
+    &_selected {
+      background-color: $iceberg_blue !important;
+
+      p {
+        color: $rich_black !important;
+      }
+    }
+
+    &:hover {
+      background-color: $light_grey;
+    }
+
+    &_avatar {
+      width: 32px !important;
+      height: 32px !important;
+      border-radius: 50%;
+      background-color: $main_blue;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 14px;
+      font-weight: bold;
+      position: relative;
+
+      .user_box_online_indicator {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background-color: $light_green;
+        position: absolute;
+        bottom: 0;
+        right: 0;
+        border: 1px solid #ddd;
+      }
+    }
+
+    &_body {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex: 1;
+      gap: 12px;
+
+      .left_side {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+
+        &_name {
+          font-size: 16px;
+          font-weight: 600;
+          color: $rich_black;
+        }
+
+        &_message {
+          font-size: 14px;
+          color: $navy_grey;
+        }
+      }
+
+      .right_side {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 4px;
+
+        &_time {
+          font-size: 12px;
+          color: black !important;
+        }
+
+        &_unread {
+          width: 18px;
+          height: 18px;
+          border-radius: 50%;
+          background-color: $light_green;
+          color: #fff;
+          font-size: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+      }
+    }
+  }
+}

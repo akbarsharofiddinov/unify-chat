@@ -1,0 +1,35 @@
+.current_chat_info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 20px;
+  background-color: #fff;
+  border-bottom: 1px solid #e0e0e0;
+  box-shadow: 1px 5px 15px rgba(0, 0, 0, 0.1);
+
+  .avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+  }
+
+  .chat_info {
+    display: flex;
+    flex-direction: column;
+
+    .chat_name {
+      font-size: 16px;
+      font-weight: 600;
+      color: $rich_black;
+    }
+
+    .chat_status {
+      font-size: 13px;
+      color: $navy_grey;
+    }
+  }
+}
