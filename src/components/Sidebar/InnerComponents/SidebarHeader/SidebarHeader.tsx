@@ -2,11 +2,24 @@ import React from "react";
 import styless from "./SidebarHeader.module.scss";
 import { Menu, Search } from "lucide-react";
 
-const SidebarHeader: React.FC = () => {
+interface IProps {
+  isSidebarOpen: boolean;
+  setIsSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>;
+}
+
+const SidebarHeader: React.FC<IProps> = ({
+  isSidebarOpen,
+  setIsSidebarOpen,
+}) => {
   return (
     <>
       <div className={styless.sidebar_header}>
-        <button className={styless.sidebar_header_menu_btn}>
+        <button
+          className={styless.sidebar_header_menu_btn}
+          onClick={() => {
+            setIsSidebarOpen((prev) => !prev);
+          }}
+        >
           <Menu />
         </button>
         {/* Search input */}

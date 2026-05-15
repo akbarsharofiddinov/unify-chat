@@ -1,17 +1,19 @@
 import React from "react";
 import { Header, Sidebar } from "../";
 import styless from "./Layout.module.scss";
-import { Outlet } from "react-router-dom";
+import { Outlet, useParams } from "react-router-dom";
 
 const Layout: React.FC = () => {
-  const [isSidebarOpen, setIsSidebarOpen] = React.useState(true);
+  const { room_id } = useParams();
 
   return (
     <>
       <div className={styless.layout}>
-        <Sidebar is_open={isSidebarOpen} />
+        <Sidebar />
         <div className={styless.layout_content}>
-          <Header />
+          {room_id && (
+            <Header />
+          )}
           <main>
             <Outlet />
           </main>

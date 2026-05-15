@@ -6,13 +6,7 @@ interface IState {
 }
 
 const initialState: IState = {
-  currentChatData: {
-    id: 5,
-    name: "Jasur Abduvaliyev",
-    message: "Yangilanishni ko‘rdingizmi?",
-    lastMessageTime: "11:20",
-    unreadCount: 0,
-  },
+  currentChatData: null,
 };
 
 export const chatInfoSlice = createSlice({

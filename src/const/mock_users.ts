@@ -1,4 +1,4 @@
-const mock_users = [
+const mock_users: MockUser[] = [
   {
     id: 1,
     name: "Ali Valiyev",
