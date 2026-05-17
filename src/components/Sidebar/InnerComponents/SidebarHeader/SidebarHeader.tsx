@@ -27,7 +27,7 @@ const SidebarHeader: React.FC<IProps> = ({
           <span className={styless.sidebar_header_search_icon}>
             <Search size={18} />
           </span>
-          <input type="text" placeholder="Search..." />
+          <input type="text" placeholder="Qidiruv..." />
         </div>
       </div>
     </>

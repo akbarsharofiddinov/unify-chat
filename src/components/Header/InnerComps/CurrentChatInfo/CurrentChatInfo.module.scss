@@ -7,6 +7,19 @@
   border-bottom: 1px solid #e0e0e0;
   box-shadow: 1px 5px 15px rgba(0, 0, 0, 0.1);
 
+  .back_button {
+    padding: 10px;
+    border-radius: 50%;
+    cursor: pointer;
+
+    transition: background-color ease-in-out 0.2s;
+    margin-right: 10px;
+
+    &:hover {
+      background-color: $iceberg_blue;
+    }
+  }
+
   .avatar {
     width: 32px;
     height: 32px;

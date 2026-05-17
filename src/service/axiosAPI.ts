@@ -21,11 +21,11 @@ axiosAPI.interceptors.request.use((config) => {
 });
 
 // e-komplektasiya
-// axiosAPI.interceptors.request.use((config) => {
-//   const token = localStorage.getItem("v3_ganiwer");
-//   if (token) {
-//     config.headers.Authorization = `Bearer ${token}`;
-//   }
+axiosAPI.interceptors.request.use((config) => {
+  const token = localStorage.getItem("unify_chat_token");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
 
-//   return config;
-// });
+  return config;
+});
