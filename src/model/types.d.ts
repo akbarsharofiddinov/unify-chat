@@ -73,3 +73,29 @@ interface MessageData {
   }[];
   created_at: string;
 }
+
+interface IUser {
+  id: number
+  username: string
+  full_name: string
+  region: string
+  district: string
+  department: string
+  position: string
+  role: string
+  is_active: boolean
+  permission: any
+  department_id: string
+  department_category: string
+  employee_id: string
+  sub_department_category: any
+  ware_house: any[]
+  sub_department: any
+  sub_department_id: any
+  position_id: string
+  region_id: string
+  district_id: string
+  role_employee: any
+  photo_url: any
+  phone: string
+}

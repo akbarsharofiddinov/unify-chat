@@ -5,20 +5,23 @@ import { MessageSquarePlus, Users, UserPlus } from "lucide-react";
 import { CreateRoomModal } from "@/components";
 
 const Sidebar: React.FC = () => {
-  const [isSidebarOpen, setIsSidebarOpen] = React.useState(true);
+  const [, setIsSidebarOpen] = React.useState(true);
   const [isCreateMenuOpen, setIsCreateMenuOpen] = React.useState(false);
   const [newRoomType, setNewRoomType] = React.useState<roomType | null>(null);
+  const refreshChatRoomsRef = React.useRef<(() => void) | null>(null);
 
   return (
     <>
       <aside className={styless.sidebar}>
         <SidebarHeader
-          isSidebarOpen={isSidebarOpen}
           setIsSidebarOpen={setIsSidebarOpen}
+          onRefresh={() => refreshChatRoomsRef.current?.()}
         />
 
         {/* Sidebar content */}
-        <ChatMenu />
+        <ChatMenu registerRefresh={(fn) => {
+          refreshChatRoomsRef.current = fn;
+        }} />
 
         {/* Create Room FAB */}
         <div className={styless.create_room_wrapper}>

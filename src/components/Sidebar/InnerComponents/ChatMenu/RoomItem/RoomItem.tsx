@@ -17,6 +17,8 @@ const RoomItem: React.FC<IProps> = ({ user }) => {
 
   const navigate = useNavigate();
 
+  console.log(user);
+
   return (
     <>
       <div
@@ -44,21 +46,25 @@ const RoomItem: React.FC<IProps> = ({ user }) => {
           {/* left side - user info & message */}
           <div className={styless.left_side}>
             <p className={styless.left_side_name}>{user.name || "Noma'lum"}</p>
-            <p className={styless.left_side_message}>
-              {user.last_message.text}
-            </p>
-          </div>
-          {/* right side - time & unread count */}
-          <div className={styless.right_side}>
-            <p className={styless.right_side_time}>
-              {formatDateTime(user.last_message.created_at)}
-            </p>
-            {user.unread_count > 0 && (
-              <span className={styless.right_side_unread}>
-                {user.unread_count}
-              </span>
+            {user.last_message && (
+              <p className={styless.left_side_message}>
+                {user.last_message.text}
+              </p>
             )}
           </div>
+          {/* right side - time & unread count */}
+          {user.last_message && (
+            <div className={styless.right_side}>
+              <p className={styless.right_side_time}>
+                {formatDateTime(user.last_message.created_at)}
+              </p>
+              {user.unread_count > 0 && (
+                <span className={styless.right_side_unread}>
+                  {user.unread_count}
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </>

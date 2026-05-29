@@ -164,7 +164,7 @@ const ChatRoom: React.FC = () => {
             />
           </div>
 
-          <button className={styless.send_btn}>
+          <button className={styless.send_btn} onClick={() => {}}>
             <SendHorizonal size={20} />
           </button>
         </div>

@@ -1,15 +1,15 @@
 import React from "react";
 import styless from "./SidebarHeader.module.scss";
-import { Menu, Search } from "lucide-react";
+import { Menu, RefreshCcw, Search } from "lucide-react";
 
 interface IProps {
-  isSidebarOpen: boolean;
   setIsSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  onRefresh?: () => void;
 }
 
 const SidebarHeader: React.FC<IProps> = ({
-  isSidebarOpen,
   setIsSidebarOpen,
+  onRefresh,
 }) => {
   return (
     <>
@@ -29,6 +29,10 @@ const SidebarHeader: React.FC<IProps> = ({
           </span>
           <input type="text" placeholder="Qidiruv..." />
         </div>
+
+        <button onClick={onRefresh}>
+          <RefreshCcw size={18} />
+        </button>
       </div>
     </>
   );
