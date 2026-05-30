@@ -3,7 +3,7 @@ import styless from "../ChatMenu.module.scss";
 import USER_COLORS from "@/const/user_colors";
 import { UserRound } from "lucide-react";
 import { useAppDispatch, useAppSelector } from "@/store/hooks/hooks";
-import { setCurrentChatData } from "@/store/slices/ChatInfoSlice";
+import { setCurrentChatData } from "@/store/slices/chatInfoSlice";
 import { formatDateTime } from "@/utils/FormatDateTime";
 import { useNavigate } from "react-router-dom";
 
@@ -16,8 +16,6 @@ const RoomItem: React.FC<IProps> = ({ user }) => {
   const dispatch = useAppDispatch();
 
   const navigate = useNavigate();
-
-  console.log(user);
 
   return (
     <>
@@ -45,7 +43,9 @@ const RoomItem: React.FC<IProps> = ({ user }) => {
         <div className={styless.user_box_body}>
           {/* left side - user info & message */}
           <div className={styless.left_side}>
-            <p className={styless.left_side_name}>{user.name || "Noma'lum"}</p>
+            <p className={styless.left_side_name}>
+              {user.companion?.full_name || "Noma'lum"}
+            </p>
             {user.last_message && (
               <p className={styless.left_side_message}>
                 {user.last_message.text}

@@ -2,7 +2,7 @@ import React from "react";
 import { Header, Sidebar } from "../";
 import styless from "./Layout.module.scss";
 import { Outlet, useParams } from "react-router-dom";
-import TokenCostumizer from "../TokenCostumizer/TokenCostumizer";
+// import TokenCostumizer from "../TokenCostumizer/TokenCostumizer";
 
 const Layout: React.FC = () => {
   const { room_id } = useParams();
@@ -21,7 +21,7 @@ const Layout: React.FC = () => {
         </div>
       </div>
 
-      <TokenCostumizer />
+      {/* <TokenCostumizer /> */}
     </>
   );
 };

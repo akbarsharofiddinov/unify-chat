@@ -1,5 +1,5 @@
 import { configureStore } from "@reduxjs/toolkit";
-import { chatInfoSlice } from "./slices/ChatInfoSlice";
+import { chatInfoSlice } from "./slices/chatInfoSlice";
 
 export const store = configureStore({
   reducer: {

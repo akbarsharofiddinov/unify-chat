@@ -9,12 +9,14 @@ interface IProps {
 }
 
 const ChatMenu: React.FC<IProps> = ({ registerRefresh }) => {
-  const [chatRooms, setChatRooms] = useState([]);
+  const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
 
   const fetchChatRooms = useCallback(async () => {
     try {
-      const response = await axiosAPI.get("room/");
-      if (response.status === 200) setChatRooms(response.data.results);
+      const { status, data }: { status: number; data: ChatRoomsResponse } =
+        await axiosAPI.get("room/");
+      if (status === 200) setChatRooms(data.results);
+      console.log(data.results)
     } catch (error) {
       console.log(error);
     }

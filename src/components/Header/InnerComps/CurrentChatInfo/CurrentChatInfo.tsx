@@ -4,7 +4,7 @@ import styless from "./CurrentChatInfo.module.scss";
 import { ArrowLeft, UserRound } from "lucide-react";
 import USER_COLORS from "@/const/user_colors";
 import { useNavigate, useParams } from "react-router-dom";
-import { setCurrentChatData } from "@/store/slices/ChatInfoSlice";
+import { setCurrentChatData } from "@/store/slices/chatInfoSlice";
 
 const CurrentChatInfo: React.FC = () => {
   const { currentChatData } = useAppSelector((state) => state.chatInfo);

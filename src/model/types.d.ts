@@ -2,15 +2,6 @@ type projectSlug = "m_gaz" | "ekompletasiya";
 type roomType = "direct" | "group";
 type messageType = "text" | "file" | "image" | "voice";
 
-interface MockUser {
-  id: number;
-  name: string;
-  message: string;
-  lastMessageTime: string;
-  unreadCount: number;
-  isOnline: boolean;
-}
-
 interface ChatRoom {
   id: number;
   avatar: string | null;
@@ -20,6 +11,22 @@ interface ChatRoom {
   type: roomType;
   unread_count: number;
   last_message: LastMessage;
+  companion: {
+    avatar: string | null;
+    full_name: string;
+    id: number;
+  }
+}
+
+interface defaultResponse {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: T[];
+}
+
+interface ChatRoomsResponse extends defaultResponse {
+  results: ChatRoom[];
 }
 
 interface LastMessage {

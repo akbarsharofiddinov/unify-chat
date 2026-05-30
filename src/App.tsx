@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { Layout } from "@/components";
 import { ChatRoom, EmptyRoom } from "./pages";
@@ -20,6 +20,19 @@ const App: React.FC = () => {
       ],
     },
   ]);
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data.type === "AUTH_TOKEN") {
+        localStorage.setItem(
+          "unify_chat_token",
+          event.data.token
+        );
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+
+    
 
   return (
     <>
