@@ -25,5 +25,5 @@ export const MessageStatusIcon: React.FC<MessageStatusIconProps> = ({ status }) 
     }
   };
 
-  return <div className={styles.status_icon}>{renderIcon()} {status}</div>;
+  return <div className={styles.status_icon}>{renderIcon()}</div>;
 };
