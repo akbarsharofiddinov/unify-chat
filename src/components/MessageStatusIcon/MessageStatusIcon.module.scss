@@ -1,0 +1,33 @@
+/**
+ * Message status icon styles - messenger style
+ * Animated icons for send/sent/read states
+ */
+
+.status_icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.icon_sending {
+  color: #9ca3af;
+  animation: rotate 2s linear infinite;
+}
+
+.icon_sent {
+  color: #6b7280;
+}
+
+.icon_read {
+  color: #2563eb;
+}
+
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

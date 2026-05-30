@@ -2,6 +2,7 @@ import { axiosAPI } from "@/service/axiosAPI";
 import { parseTokenUserId, useChatWebSocket, type ServerSocketPayload } from "@/hooks/useChatWebSocket";
 import { useAppDispatch } from "@/store/hooks/hooks";
 import { setCurrentChatData } from "@/store/slices/chatInfoSlice";
+import { updateRoomUnreadCount } from "@/store/slices/chatRoomsSlice";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import styless from "./ChatRoom.module.scss";
@@ -17,6 +18,9 @@ import {
   Video,
 } from "lucide-react";
 import clsx from "clsx";
+import { formatDateTime } from "@/utils/FormatDateTime";
+import { getMessageStatus } from "@/utils/MessageStatus";
+import { MessageStatusIcon } from "@/components/MessageStatusIcon";
 
 const calculateIsMy = (message: MessageData, selfUserId: number | null) => {
   if (message.sender?.id != null && selfUserId != null) {
@@ -35,6 +39,8 @@ const ChatRoom: React.FC = () => {
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
   const [editingText, setEditingText] = useState("");
   const [sendError, setSendError] = useState<string | null>(null);
+  const [pendingMessageIds, setPendingMessageIds] = useState<Set<number>>(new Set());
+  const pendingMessageSignaturesRef = useRef<Record<number, { text: string; created_at: string }>>({});
 
   const { room_id } = useParams();
   const dispatch = useAppDispatch();
@@ -71,13 +77,51 @@ const ChatRoom: React.FC = () => {
           return updated;
         }
 
+        const normalizeText = (t?: string) => (t ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+
+        const pendingIndex = prev.findIndex((item) => {
+          if (!item.is_my) return false;
+          const signature = pendingMessageSignaturesRef.current[item.id];
+          if (!signature) return false;
+
+          const sigText = normalizeText(signature.text);
+          const msgText = normalizeText(normalized.text);
+
+          // Allow match when normalized texts are equal or one contains the other (minor server-side changes)
+          const textMatches = sigText === msgText || sigText.startsWith(msgText) || msgText.startsWith(sigText);
+          if (!textMatches) return false;
+
+          const localTime = new Date(signature.created_at).getTime();
+          const serverTime = new Date(normalized.created_at).getTime();
+
+          // Increase tolerance to 30s to account for clock differences / processing delays
+          return Math.abs(localTime - serverTime) <= 30000;
+        });
+
+        if (pendingIndex >= 0) {
+          const pendingId = prev[pendingIndex].id;
+          setPendingMessageIds((pending) => {
+            const updated = new Set(pending);
+            updated.delete(pendingId);
+            return updated;
+          });
+          delete pendingMessageSignaturesRef.current[pendingId];
+
+          const updated = [...prev];
+          updated[pendingIndex] = { ...updated[pendingIndex], ...normalized };
+          return updated.sort(
+            (left, right) =>
+              new Date(left.created_at).getTime() - new Date(right.created_at).getTime(),
+          );
+        }
+
         return [...prev, normalized].sort(
           (left, right) =>
             new Date(left.created_at).getTime() - new Date(right.created_at).getTime(),
         );
       });
     },
-    [normalizeMessage],
+    [normalizeMessage, pendingMessageIds],
   );
 
   const updateMessageReads = useCallback((messageId: number, user: MembarData) => {
@@ -263,20 +307,25 @@ const ChatRoom: React.FC = () => {
   }, [messages]);
 
   useEffect(() => {
-    if (!isConnected || !selfUserId) return;
+    if (!isConnected || !selfUserId || !room_id) return;
     const unreadIds = messages
       .filter(
         (msg) =>
           !msg.reads?.some((read: { user: { id: number } }) => read.user.id === selfUserId) &&
-          !readSentRef.current.has(msg.id),
+          !readSentRef.current.has(msg.id) &&
+          !pendingMessageIds.has(msg.id),
       )
       .map((msg) => msg.id);
+
+    if (unreadIds.length > 0) {
+      dispatch(updateRoomUnreadCount({ roomId: Number(room_id), unread_count: 0 }));
+    }
 
     unreadIds.forEach((id) => {
       sendRead(id);
       readSentRef.current.add(id);
     });
-  }, [isConnected, messages, sendRead, selfUserId]);
+  }, [dispatch, isConnected, messages, room_id, sendRead, selfUserId, pendingMessageIds]);
 
   const handleInputChange = (value: string) => {
     setMessage(value);
@@ -291,9 +340,47 @@ const ChatRoom: React.FC = () => {
     if (!message.trim()) return;
 
     setSendError(null);
+    
+    // Generate temporary negative ID for optimistic update to avoid colliding with server IDs
+    const tempId = -Date.now();
+    
+    // Create optimistic message
+    const optimisticMessage: MessageData = {
+      id: tempId,
+      type: "text",
+      text: message,
+      is_my: true,
+      sender: {
+        id: selfUserId || 0,
+        full_name: "You",
+        avatar: null,
+      },
+      reads: [],
+      file: null,
+      reply_to: null,
+      created_at: new Date().toISOString(),
+    };
+
+    // Add to messages immediately (optimistic update)
+    upsertMessage(optimisticMessage);
+    pendingMessageSignaturesRef.current[tempId] = {
+      text: message.trim(),
+      created_at: optimisticMessage.created_at,
+    };
+    
+    // Mark as pending
+    setPendingMessageIds((prev) => new Set([...prev, tempId]));
+
     const wasSent = socketSendMessage(message);
     if (!wasSent) {
       setSendError("Xabarni jo'nata olmadik. Iltimos, tarmoqqa ulanganingizni tekshiring.");
+      // Remove from pending on error
+      setPendingMessageIds((prev) => {
+        const updated = new Set(prev);
+        updated.delete(tempId);
+        return updated;
+      });
+      delete pendingMessageSignaturesRef.current[tempId];
       return;
     }
 
@@ -339,6 +426,12 @@ const ChatRoom: React.FC = () => {
     return companion?.fulle_name || companion?.full_name || "Shaxsiy chat";
   }, [chatData]);
 
+  const typingLabel = useMemo(() => {
+    if (!typingUsers.length) return null;
+    if (typingUsers.length === 1) return "Yozmoqda";
+    return `${typingUsers.length} kishi yozmoqda`;
+  }, [typingUsers]);
+
   const statusLabel = useMemo(() => {
     if (status === "connecting") return "Ulanmoqda...";
     if (status === "reconnecting") return "Qayta ulanmoqda...";
@@ -346,16 +439,16 @@ const ChatRoom: React.FC = () => {
     if (status === "forbidden") return "Siz bu xonada a'zo emassiz.";
     if (status === "error") return lastError || "Ulanishda xato yuz berdi.";
 
-    return chatData?.type === "group"
-      ? `${chatData?.members?.length || 0} a'zo`
-      : "online";
+    if (chatData?.type === "group") {
+      return `${chatData?.members?.length || 0} a'zo`;
+    }
+
+    const companion = (chatData?.members as any[])?.find((member) => !member.is_me) as any;
+    if (!companion) return "Offline";
+    return companion.is_online ? "Online" : "Offline";
   }, [chatData, lastError, status]);
 
-  const typingLabel = useMemo(() => {
-    if (!typingUsers.length) return null;
-    if (typingUsers.length === 1) return `${typingUsers[0].full_name} yozmoqda...`;
-    return `${typingUsers.length} kishi yozmoqda...`;
-  }, [typingUsers]);
+  const headerStatus = typingLabel || statusLabel;
 
   return (
     <>
@@ -366,7 +459,16 @@ const ChatRoom: React.FC = () => {
 
             <div className={styless.chat_info}>
               <h2>{roomTitle}</h2>
-              <span>{statusLabel}</span>
+              <span className={styless.chat_status}>
+                {headerStatus}
+                {typingLabel && (
+                  <span className={styless.chat_status_dots}>
+                    <span className={styless.chat_status_dot} />
+                    <span className={styless.chat_status_dot} />
+                    <span className={styless.chat_status_dot} />
+                  </span>
+                )}
+              </span>
             </div>
           </div>
 
@@ -402,7 +504,13 @@ const ChatRoom: React.FC = () => {
                 msg.is_my ? styless.message_wrapper_me : styless.message_wrapper_other,
               )}
             >
-              <div className={clsx(styless.message, msg.is_my ? styless.message_me : styless.message_other)}>
+              <div
+                className={clsx(
+                  styless.message,
+                  msg.is_my ? styless.message_me : styless.message_other,
+                  msg.text === "Xabar o'chirildi" && styless.message_deleted,
+                )}
+              >
                 {!msg.is_my && (
                   <span className={styless.message_sender}>{msg.sender?.full_name}</span>
                 )}
@@ -426,17 +534,27 @@ const ChatRoom: React.FC = () => {
                   </div>
                 ) : (
                   <>
-                    <p>{msg.text}</p>
+                    <p className={msg.text === "Xabar o'chirildi" ? styless.deleted_text : ""}>
+                      {msg.text}
+                    </p>
                     <div className={styless.message_footer}>
-                      <span>
-                        {msg.created_at}
-                        {msg.is_my && msg.reads?.length ? ` · ${msg.reads.length} o'qildi` : ""}
+                      <span className={styless.message_time}>
+                        {formatDateTime(msg.created_at)}
                       </span>
+                      {msg.is_my && (
+                        <MessageStatusIcon
+                          status={getMessageStatus(
+                            msg.id,
+                            pendingMessageIds.has(msg.id),
+                            msg.reads?.length ?? 0
+                          )}
+                        />
+                      )}
                     </div>
                   </>
                 )}
 
-                {msg.is_my && editingMessageId !== msg.id && !msg.text.includes("o'chirildi") && (
+                {msg.is_my && editingMessageId !== msg.id && msg.text !== "Xabar o'chirildi" && (
                   <div className={styless.message_actions}>
                     <button
                       className={styless.message_action_button}
@@ -458,7 +576,6 @@ const ChatRoom: React.FC = () => {
             </div>
           ))}
 
-          {typingLabel && <div className={styless.typing_indicator}>{typingLabel}</div>}
           {loadingMessages && <div className={styless.loading_text}>Yuklanmoqda...</div>}
           <div ref={messagesEndRef} />
         </div>

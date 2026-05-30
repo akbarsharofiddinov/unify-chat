@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React from "react";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { Layout } from "@/components";
 import { ChatRoom, EmptyRoom } from "./pages";

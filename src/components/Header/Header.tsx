@@ -1,5 +1,5 @@
 import React from "react";
-import { ChatActions, CurrentChatInfo } from "./InnerComps";
+import { CurrentChatInfo } from "./InnerComps";
 
 const Header: React.FC = () => {
 
