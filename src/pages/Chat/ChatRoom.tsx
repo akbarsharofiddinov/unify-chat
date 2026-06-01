@@ -10,6 +10,7 @@ import { updateRoomUnreadCount } from "@/store/slices/chatRoomsSlice";
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -19,6 +20,8 @@ import styless from "./ChatRoom.module.scss";
 import {
   ArrowLeft,
   Check,
+  ChevronDown,
+  ChevronUp,
   Edit3,
   Info,
   MoreVertical,
@@ -32,6 +35,7 @@ import clsx from "clsx";
 import { formatDateTime } from "@/utils/FormatDateTime";
 import { getMessageStatus } from "@/utils/MessageStatus";
 import { MessageStatusIcon } from "@/components/MessageStatusIcon";
+import { ChatInfoModal } from "@/components";
 
 const calculateIsMy = (message: MessageData, selfUserId: number | null) => {
   if (message.sender?.id != null && selfUserId != null) {
@@ -46,6 +50,27 @@ const ChatRoom: React.FC = () => {
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<MessageData[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [currentMatchIndex, setCurrentMatchIndex] = useState<number>(-1);
+  const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
+
+  // Upward infinite scroll pagination states
+  const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
+  const [hasNextPage, setHasNextPage] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Upward infinite scroll pagination refs
+  const chatMessagesRef = useRef<HTMLDivElement | null>(null);
+  const nextPageUrlRef = useRef<string | null>(null);
+  const isLoadingOlderMessagesRef = useRef<boolean>(false);
+  const lastFetchedUrlRef = useRef<string | null>(null);
+  const scrollSnapshotRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
+  const prevScrollHeightRef = useRef<number>(0);
+  const initialLoadCompleteRef = useRef<boolean>(false);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   const [typingUsers, setTypingUsers] = useState<MembarData[]>([]);
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
   const [editingText, setEditingText] = useState("");
@@ -175,12 +200,12 @@ const ChatRoom: React.FC = () => {
         msg.id !== messageId
           ? msg
           : {
-              ...msg,
-              text: "Xabar o'chirildi",
-              type: "text",
-              reply_to: null,
-              reads: msg.reads ?? [],
-            },
+            ...msg,
+            text: "Xabar o'chirildi",
+            type: "text",
+            reply_to: null,
+            reads: msg.reads ?? [],
+          },
       ),
     );
   }, []);
@@ -302,7 +327,17 @@ const ChatRoom: React.FC = () => {
 
     try {
       setLoadingMessages(true);
-      const response = await axiosAPI.get<{ results: MessageData[] }>(
+
+      // Reset pagination states before loading new room messages
+      nextPageUrlRef.current = null;
+      setHasNextPage(false);
+      setCurrentPage(1);
+      lastFetchedUrlRef.current = null;
+      scrollSnapshotRef.current = null;
+      initialLoadCompleteRef.current = false;
+      prevScrollHeightRef.current = 0;
+
+      const response = await axiosAPI.get<{ next: string | null; results: MessageData[] }>(
         `room/${room_id}/messages/?limit=30`,
       );
       if (response.status === 200) {
@@ -315,6 +350,11 @@ const ChatRoom: React.FC = () => {
                 new Date(right.created_at).getTime(),
             ),
         );
+
+        // Store the pagination cursor link
+        nextPageUrlRef.current = response.data.next;
+        setHasNextPage(Boolean(response.data.next));
+        initialLoadCompleteRef.current = true;
       }
     } catch (error) {
       console.error(error);
@@ -325,13 +365,15 @@ const ChatRoom: React.FC = () => {
 
   useEffect(() => {
     if (room_id) {
-      fetchRoomData();
-      fetchMessages();
+      Promise.resolve().then(() => {
+        fetchRoomData();
+        fetchMessages();
+        setTypingUsers([]);
+        setEditingMessageId(null);
+        setEditingText("");
+        setSendError(null);
+      });
       readSentRef.current.clear();
-      setTypingUsers([]);
-      setEditingMessageId(null);
-      setEditingText("");
-      setSendError(null);
       previousLastMessageId.current = null;
     }
   }, [room_id, fetchRoomData, fetchMessages]);
@@ -348,6 +390,268 @@ const ChatRoom: React.FC = () => {
       });
     }
   }, [messages]);
+
+  // Load older messages (previous page)
+  const loadOlderMessages = useCallback(async () => {
+    const url = nextPageUrlRef.current;
+
+    // Check if there's a next page URL and we're not already loading
+    if (!url) {
+      console.log('No next page URL available');
+      return;
+    }
+
+    if (isLoadingOlderMessagesRef.current) {
+      console.log('Already loading older messages');
+      return;
+    }
+
+    // Guard: Prevent double-fetching the same URL
+    if (lastFetchedUrlRef.current === url) {
+      console.log('Already fetched this URL:', url);
+      return;
+    }
+
+    console.log('Loading older messages from:', url);
+
+    // Acquire loading locks
+    isLoadingOlderMessagesRef.current = true;
+    setIsLoadingOlderMessages(true);
+    lastFetchedUrlRef.current = url;
+
+    // Take scroll snapshot of the container before DOM modifications
+    const container = chatMessagesRef.current;
+    if (container) {
+      scrollSnapshotRef.current = {
+        scrollHeight: container.scrollHeight,
+        scrollTop: container.scrollTop,
+      };
+      prevScrollHeightRef.current = container.scrollHeight;
+    }
+
+    try {
+      const response = await axiosAPI.get<{ next: string | null; results: MessageData[] }>(url);
+      if (response.status === 200) {
+        const oldMessages = response.data.results
+          .map((item) => normalizeMessage(item))
+          .sort(
+            (left, right) =>
+              new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
+          );
+
+        if (oldMessages.length > 0) {
+          setMessages((prev) => {
+            // Deduplicate to prevent race conditions or duplicate websocket prepends
+            const existingIds = new Set(prev.map((msg) => msg.id));
+            const uniqueOld = oldMessages.filter((msg) => !existingIds.has(msg.id));
+
+            if (uniqueOld.length === 0) {
+              console.log('All older messages already exist, moving to next page');
+              // If all messages are duplicates, try next page
+              nextPageUrlRef.current = response.data.next;
+              setHasNextPage(Boolean(response.data.next));
+              lastFetchedUrlRef.current = null; // Reset to allow next fetch
+
+              // Release loading locks before recursive call
+              isLoadingOlderMessagesRef.current = false;
+              setIsLoadingOlderMessages(false);
+              scrollSnapshotRef.current = null;
+
+              // Recursively try next page if available
+              if (response.data.next) {
+                setTimeout(() => loadOlderMessages(), 100);
+              }
+              return prev;
+            }
+
+            const mergedMessages = [...uniqueOld, ...prev].sort(
+              (left, right) =>
+                new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
+            );
+
+            return mergedMessages;
+          });
+
+          // Update pagination endpoint cursor and page index
+          nextPageUrlRef.current = response.data.next;
+          setHasNextPage(Boolean(response.data.next));
+          setCurrentPage((prevPage) => prevPage + 1);
+
+          console.log('Loaded older messages, has next page:', Boolean(response.data.next));
+        } else {
+          // Empty results list indicates we have fully reached the beginning
+          nextPageUrlRef.current = null;
+          setHasNextPage(false);
+          console.log('No more older messages to load');
+        }
+      }
+    } catch (error) {
+      console.error("Error loading older messages:", error);
+      // Clean snapshot in case of failure to avoid stuck state
+      scrollSnapshotRef.current = null;
+    } finally {
+      // Release loading locks
+      isLoadingOlderMessagesRef.current = false;
+      setIsLoadingOlderMessages(false);
+    }
+  }, [normalizeMessage]);
+
+  // Synchronously restore scroll position before browser repaints
+  useLayoutEffect(() => {
+    if (scrollSnapshotRef.current && chatMessagesRef.current) {
+      const container = chatMessagesRef.current;
+      const { scrollHeight, scrollTop } = scrollSnapshotRef.current;
+
+      const newScrollHeight = container.scrollHeight;
+      const heightDifference = newScrollHeight - scrollHeight;
+
+      // Adjust scrollTop relative to the height difference of prepended messages
+      container.scrollTop = scrollTop + heightDifference;
+
+      console.log('Restored scroll position:', {
+        oldHeight: scrollHeight,
+        newHeight: newScrollHeight,
+        difference: heightDifference,
+        newScrollTop: container.scrollTop
+      });
+
+      // Clean up snapshotted state
+      scrollSnapshotRef.current = null;
+    }
+  }, [messages]);
+
+  // Monitor scroll height ticks to trigger loading older messages
+  const handleScroll = useCallback(() => {
+    const container = chatMessagesRef.current;
+    if (!container || !initialLoadCompleteRef.current) return;
+
+    // Clear previous timeout to debounce scroll events
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+    }
+
+    // Debounce scroll handling
+    scrollTimeoutRef.current = setTimeout(() => {
+      // Trigger when scrolled close to the top boundary (threshold <= 50px)
+      const isNearTop = container.scrollTop <= 50;
+
+      console.log('Scroll check:', {
+        scrollTop: container.scrollTop,
+        isNearTop,
+        hasNextPage: Boolean(nextPageUrlRef.current),
+        isLoading: isLoadingOlderMessagesRef.current
+      });
+
+      if (isNearTop && nextPageUrlRef.current && !isLoadingOlderMessagesRef.current) {
+        console.log('Triggering loadOlderMessages');
+        loadOlderMessages();
+      }
+    }, 150); // 150ms debounce
+  }, [loadOlderMessages]);
+
+  // Clean up scroll timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Debounce search input
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setSearchQuery(searchInput);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [searchInput]);
+
+  // Find messages matching search query
+  const matchedMessages = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const query = searchQuery.toLowerCase();
+    return messages.filter(
+      (msg) =>
+        msg.text &&
+        msg.text !== "Xabar o'chirildi" &&
+        msg.text.toLowerCase().includes(query)
+    );
+  }, [messages, searchQuery]);
+
+  // Default to last match (most recent) when matches change
+  useEffect(() => {
+    Promise.resolve().then(() => {
+      if (matchedMessages.length > 0) {
+        setCurrentMatchIndex(matchedMessages.length - 1);
+      } else {
+        setCurrentMatchIndex(-1);
+      }
+    });
+  }, [matchedMessages]);
+
+  // Scroll to active match
+  useEffect(() => {
+    if (currentMatchIndex >= 0 && matchedMessages[currentMatchIndex]) {
+      const activeId = matchedMessages[currentMatchIndex].id;
+      const element = document.getElementById(`msg-${activeId}`);
+      if (element) {
+        element.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        });
+      }
+    }
+  }, [currentMatchIndex, matchedMessages]);
+
+  const handleCloseSearch = useCallback(() => {
+    setIsSearchOpen(false);
+    setSearchInput("");
+    setSearchQuery("");
+    setCurrentMatchIndex(-1);
+  }, []);
+
+  const handlePrevMatch = useCallback(() => {
+    if (matchedMessages.length === 0) return;
+    setCurrentMatchIndex((prev) =>
+      prev <= 0 ? matchedMessages.length - 1 : prev - 1
+    );
+  }, [matchedMessages]);
+
+  const handleNextMatch = useCallback(() => {
+    if (matchedMessages.length === 0) return;
+    setCurrentMatchIndex((prev) =>
+      prev >= matchedMessages.length - 1 ? 0 : prev + 1
+    );
+  }, [matchedMessages]);
+
+  const renderHighlightedText = useCallback(
+    (text: string, query: string, isActive: boolean) => {
+      if (!query.trim() || text === "Xabar o'chirildi") {
+        return text;
+      }
+      const escapedQuery = query.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
+      const regex = new RegExp(`(${escapedQuery})`, "gi");
+      const parts = text.split(regex);
+
+      return parts.map((part, idx) => {
+        const isMatch = part.toLowerCase() === query.toLowerCase();
+        return isMatch ? (
+          <mark
+            key={idx}
+            className={clsx(
+              styless.highlight,
+              isActive && styless.highlight_active
+            )}
+          >
+            {part}
+          </mark>
+        ) : (
+          part
+        );
+      });
+    },
+    []
+  );
 
   useEffect(() => {
     if (!isConnected || !selfUserId || !room_id) return;
@@ -517,44 +821,111 @@ const ChatRoom: React.FC = () => {
     <>
       <div className={styless.chat_room}>
         <header className={styless.chat_header}>
-          <div className={styless.chat_header_left}>
-            <button
-              className={styless.back_button}
-              onClick={() => {
-                dispatch(setCurrentChatData(null));
-                navigate("/");
-              }}
-            >
-              <ArrowLeft />
-            </button>
-            <div className={styless.chat_avatar}>{roomTitle?.[0]}</div>
-
-            <div className={styless.chat_info}>
-              <h2>{roomTitle}</h2>
-              <span className={styless.chat_status}>
-                {headerStatus}
-                {typingLabel && (
-                  <span className={styless.chat_status_dots}>
-                    <span className={styless.chat_status_dot} />
-                    <span className={styless.chat_status_dot} />
-                    <span className={styless.chat_status_dot} />
+          {isSearchOpen ? (
+            <div className={styless.search_header_container}>
+              <button
+                className={styless.search_close_btn}
+                onClick={handleCloseSearch}
+                title="Qidiruvni yopish"
+              >
+                <ArrowLeft size={20} />
+              </button>
+              <div className={styless.search_input_wrapper}>
+                <input
+                  type="text"
+                  placeholder="Xabarlarni qidirish..."
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  className={styless.search_input}
+                  autoFocus
+                />
+              </div>
+              {matchedMessages.length > 0 && (
+                <div className={styless.search_nav}>
+                  <span className={styless.search_count}>
+                    {currentMatchIndex + 1} / {matchedMessages.length}
                   </span>
-                )}
-              </span>
+                  <button
+                    onClick={handlePrevMatch}
+                    className={styless.search_nav_btn}
+                    title="Oldingi"
+                  >
+                    <ChevronUp size={20} />
+                  </button>
+                  <button
+                    onClick={handleNextMatch}
+                    className={styless.search_nav_btn}
+                    title="Keyingi"
+                  >
+                    <ChevronDown size={20} />
+                  </button>
+                </div>
+              )}
+              {searchInput.trim() !== "" && matchedMessages.length === 0 && (
+                <span className={styless.no_results}>Natija topilmadi</span>
+              )}
             </div>
-          </div>
+          ) : (
+            <>
+              <div className={styless.chat_header_left}>
+                <button
+                  className={styless.back_button}
+                  onClick={() => {
+                    dispatch(setCurrentChatData(null));
+                    navigate("/");
+                  }}
+                >
+                  <ArrowLeft />
+                </button>
+                <div className={styless.chat_avatar}>{roomTitle?.[0]}</div>
 
-          <div className={styless.chat_header_actions}>
-            <button>
-              <Search size={20} />
-            </button>
-            <button>
-              <Info size={20} />
-            </button>
-          </div>
+                <div className={styless.chat_info}>
+                  <h2>{roomTitle}</h2>
+                  <span className={styless.chat_status}>
+                    {headerStatus}
+                    {typingLabel && (
+                      <span className={styless.chat_status_dots}>
+                        <span className={styless.chat_status_dot} />
+                        <span className={styless.chat_status_dot} />
+                        <span className={styless.chat_status_dot} />
+                      </span>
+                    )}
+                  </span>
+                </div>
+              </div>
+
+              <div className={styless.chat_header_actions}>
+                <button onClick={() => setIsSearchOpen(true)} title="Qidirish">
+                  <Search size={20} />
+                </button>
+                <button onClick={() => setIsInfoModalOpen(true)} title="Guruh/Chat ma'lumotlari">
+                  <Info size={20} />
+                </button>
+              </div>
+            </>
+          )}
         </header>
 
-        <div className={styless.chat_messages}>
+        <div
+          className={styless.chat_messages}
+          ref={chatMessagesRef}
+          onScroll={handleScroll}
+        >
+          {isLoadingOlderMessages && (
+            <div className={styless.loading_text}>Kattaroq xabarlar yuklanmoqda...</div>
+          )}
+
+          {hasNextPage && !isLoadingOlderMessages && (
+            <div className={styless.load_more_container}>
+              <button
+                className={styless.load_more_btn}
+                onClick={loadOlderMessages}
+              >
+                Eski xabarlarni yuklash
+              </button>
+            </div>
+          )}
+
           <div className={styless.messages_date}>
             <span>Bugun</span>
           </div>
@@ -562,6 +933,7 @@ const ChatRoom: React.FC = () => {
           {messages.map((msg) => (
             <div
               key={msg.id}
+              id={`msg-${msg.id}`}
               className={clsx(
                 styless.message_wrapper,
                 msg.is_my
@@ -616,7 +988,11 @@ const ChatRoom: React.FC = () => {
                           : ""
                       }
                     >
-                      {msg.text}
+                      {renderHighlightedText(
+                        msg.text,
+                        searchQuery,
+                        matchedMessages[currentMatchIndex]?.id === msg.id
+                      )}
                     </p>
                     <div className={styless.message_footer}>
                       <span className={styless.message_time}>
@@ -697,6 +1073,13 @@ const ChatRoom: React.FC = () => {
 
         {sendError && <div className={styless.input_error}>{sendError}</div>}
       </div>
+
+      <ChatInfoModal
+        isOpen={isInfoModalOpen}
+        onClose={() => setIsInfoModalOpen(false)}
+        roomData={chatData}
+        currentUserInfo={currentUserInfo}
+      />
     </>
   );
 };
