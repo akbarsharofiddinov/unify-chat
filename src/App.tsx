@@ -2,8 +2,12 @@ import React from "react";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { Layout } from "@/components";
 import { ChatRoom, EmptyRoom } from "./pages";
+import { setCurrentUserInfo } from "./store/slices/chatInfoSlice";
+import { useAppDispatch } from "./store/hooks/hooks";
+import { ToastContainer } from "react-toastify";
 
 const App: React.FC = () => {
+  const dispatch = useAppDispatch();
   const routes = createBrowserRouter([
     {
       path: "/",
@@ -27,6 +31,8 @@ const App: React.FC = () => {
           "unify_chat_token",
           event.data.token
         );
+        console.log(event.data)
+        dispatch(setCurrentUserInfo(event.data.currentUserInfo));
       }
     };
 
@@ -37,6 +43,7 @@ const App: React.FC = () => {
   return (
     <>
       <RouterProvider router={routes} />
+      <ToastContainer />
     </>
   );
 };

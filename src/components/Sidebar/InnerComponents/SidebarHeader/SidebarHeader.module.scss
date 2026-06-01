@@ -40,4 +40,29 @@
       font-size: inherit;
     }
   }
+
+  &_refresh_btn {
+    border: none;
+    background: none;
+    cursor: pointer;
+    color: var(--sidebar-header-refresh-btn);
+    transition: 0.2s;
+
+    &:hover {
+      color: var(--sidebar-header-refresh-btn-hover);
+    }
+
+    &.refreshing {
+      animation: rotate .5s ease-in-out;
+    }
+  }
+}
+
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }

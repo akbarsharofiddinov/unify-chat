@@ -1,20 +1,16 @@
 import React from "react";
-import { Header, Sidebar } from "../";
+import { Sidebar } from "../";
 import styless from "./Layout.module.scss";
-import { Outlet, useParams } from "react-router-dom";
+import { Outlet } from "react-router-dom";
 // import TokenCostumizer from "../TokenCostumizer/TokenCostumizer";
 
 const Layout: React.FC = () => {
-  const { room_id } = useParams();
 
   return (
     <>
       <div className={styless.layout}>
         <Sidebar />
         <div className={styless.layout_content}>
-          {room_id && (
-            <Header />
-          )}
           <main>
             <Outlet />
           </main>

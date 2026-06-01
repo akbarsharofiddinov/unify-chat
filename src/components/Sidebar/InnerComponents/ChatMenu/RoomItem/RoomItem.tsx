@@ -6,6 +6,7 @@ import { useAppDispatch, useAppSelector } from "@/store/hooks/hooks";
 import { setCurrentChatData } from "@/store/slices/chatInfoSlice";
 import { formatDateTime } from "@/utils/FormatDateTime";
 import { useNavigate } from "react-router-dom";
+import { MdGroups } from "react-icons/md";
 
 interface IProps {
   user: ChatRoom;
@@ -33,7 +34,11 @@ const RoomItem: React.FC<IProps> = ({ user }) => {
             backgroundColor: USER_COLORS[user.id % USER_COLORS.length],
           }}
         >
-          <UserRound size={14} />
+          {user.type === "group" ? (
+            <MdGroups />
+          ) : (
+            <UserRound size={14} />
+          )}
 
           {/* {user.isOnline && (
             <span className={styless.user_box_online_indicator} />
@@ -44,7 +49,9 @@ const RoomItem: React.FC<IProps> = ({ user }) => {
           {/* left side - user info & message */}
           <div className={styless.left_side}>
             <p className={styless.left_side_name}>
-              {user.companion?.full_name || "Noma'lum"}
+              {user.name.length
+                ? user.name
+                : user.companion?.full_name || "Noma'lum"}
             </p>
             {user.last_message && (
               <p className={styless.left_side_message}>

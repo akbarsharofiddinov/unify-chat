@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import styless from "./SidebarHeader.module.scss";
 import { Menu, RefreshCcw, Search } from "lucide-react";
 
@@ -11,6 +11,7 @@ const SidebarHeader: React.FC<IProps> = ({
   setIsSidebarOpen,
   onRefresh,
 }) => {
+  const [isRefreshing, setIsRefreshing] = useState(false);
   return (
     <>
       <div className={styless.sidebar_header}>
@@ -30,7 +31,16 @@ const SidebarHeader: React.FC<IProps> = ({
           <input type="text" placeholder="Qidiruv..." />
         </div>
 
-        <button onClick={onRefresh}>
+        <button
+          onClick={() => {
+            setIsRefreshing(true);
+            onRefresh?.();
+            setTimeout(() => setIsRefreshing(false), 1000);
+          }}
+          className={`${styless.sidebar_header_refresh_btn} ${
+            isRefreshing ? styless.refreshing : ""
+          }`}
+        >
           <RefreshCcw size={18} />
         </button>
       </div>

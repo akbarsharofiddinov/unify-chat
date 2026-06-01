@@ -275,7 +275,7 @@ const CreateRoomModal: React.FC<IProps> = ({ type, onClose, onSuccess }) => {
 
               <input
                 type="text"
-                placeholder="Masalan: Frontend Team"
+                placeholder="Guruh nomi kiriting..."
                 value={roomName}
                 onChange={(e) => setRoomName(e.target.value)}
               />

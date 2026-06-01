@@ -1,4 +1,4 @@
-import React, { memo } from "react";
+import React, { memo, useMemo } from "react";
 import { useAppDispatch, useAppSelector } from "@/store/hooks/hooks";
 import styless from "./CurrentChatInfo.module.scss";
 import { ArrowLeft, UserRound } from "lucide-react";
@@ -12,6 +12,17 @@ const CurrentChatInfo: React.FC = () => {
 
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
+  
+  const roomTitle = useMemo(() => {
+      if (!currentChatData) return "Chat";
+  
+      if (currentChatData.type === "group") {
+        return currentChatData.name;
+      }
+  
+      const companion = (currentChatData.members as any[])?.find((member) => !member.is_me) as any;
+      return companion?.fulle_name || companion?.full_name || "Shaxsiy chat";
+    }, [currentChatData]);
 
   return (
     <>
@@ -43,7 +54,7 @@ const CurrentChatInfo: React.FC = () => {
           )}
 
           <div className={styless.chat_info}>
-            <span className={styless.chat_name}>{currentChatData.name}</span>
+            <span className={styless.chat_name}>{roomTitle}</span>
             <span className={styless.chat_status}>
               {currentChatData.isOnline ? "Online" : "Offline"}
             </span>

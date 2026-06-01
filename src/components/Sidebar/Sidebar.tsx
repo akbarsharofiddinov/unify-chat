@@ -3,6 +3,7 @@ import styless from "./Sidebar.module.scss";
 import { ChatMenu, SidebarHeader } from "./InnerComponents";
 import { MessageSquarePlus, Users, UserPlus } from "lucide-react";
 import { CreateRoomModal } from "@/components";
+import { toast } from "react-toastify";
 
 const Sidebar: React.FC = () => {
   const [, setIsSidebarOpen] = React.useState(true);
@@ -15,13 +16,18 @@ const Sidebar: React.FC = () => {
       <aside className={styless.sidebar}>
         <SidebarHeader
           setIsSidebarOpen={setIsSidebarOpen}
-          onRefresh={() => refreshChatRoomsRef.current?.()}
+          onRefresh={() => {
+            refreshChatRoomsRef.current?.();
+            toast.info("Chatlar yangilandi", { autoClose: 2000 });
+          }}
         />
 
         {/* Sidebar content */}
-        <ChatMenu registerRefresh={(fn) => {
-          refreshChatRoomsRef.current = fn;
-        }} />
+        <ChatMenu
+          registerRefresh={(fn) => {
+            refreshChatRoomsRef.current = fn;
+          }}
+        />
 
         {/* Create Room FAB */}
         <div className={styless.create_room_wrapper}>
@@ -70,7 +76,10 @@ const Sidebar: React.FC = () => {
         <CreateRoomModal
           type={newRoomType}
           onClose={() => setNewRoomType(null)}
-          onSuccess={() => setNewRoomType(null)}
+          onSuccess={() => {
+            refreshChatRoomsRef.current?.();
+            setIsCreateMenuOpen(false);
+          }}
         />
       )}
     </>
