@@ -10,7 +10,7 @@ import { Users, UserRound, X } from "lucide-react";
 import clsx from "clsx";
 import { axiosAPI } from "@/service/axiosAPI";
 
-const USERS_API_URL = "https://v3.ekomplektasiya.uz/api/users/users/";
+const USERS_API_URL = "https://v3.ekomplektasiya.uz/api/users/internal/employees/";
 
 interface UsersPageResponse {
   results: IUser[];

@@ -70,6 +70,7 @@ interface MessageData {
   id: number;
   type: messageType;
   text: string;
+  is_edited?: boolean;
   file: File | null;
   is_my: boolean;
   reply_to: number | null;

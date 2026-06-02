@@ -6,7 +6,7 @@ import {
 } from "@/hooks/useChatWebSocket";
 import { useAppDispatch, useAppSelector } from "@/store/hooks/hooks";
 import { setCurrentChatData } from "@/store/slices/chatInfoSlice";
-import { updateRoomUnreadCount } from "@/store/slices/chatRoomsSlice";
+import { updateRoomUnreadCount, setRoomLastMessage } from "@/store/slices/chatRoomsSlice";
 import React, {
   useCallback,
   useEffect,
@@ -24,18 +24,15 @@ import {
   ChevronUp,
   Edit3,
   Info,
-  MoreVertical,
-  Paperclip,
   Search,
-  SendHorizonal,
   Trash2,
-  Video,
 } from "lucide-react";
 import clsx from "clsx";
 import { formatDateTime } from "@/utils/FormatDateTime";
 import { getMessageStatus } from "@/utils/MessageStatus";
 import { MessageStatusIcon } from "@/components/MessageStatusIcon";
 import { ChatInfoModal } from "@/components";
+import ChatInput from "./ChatInput/ChatInput";
 
 const calculateIsMy = (message: MessageData, selfUserId: number | null) => {
   if (message.sender?.id != null && selfUserId != null) {
@@ -58,16 +55,16 @@ const ChatRoom: React.FC = () => {
 
   // Upward infinite scroll pagination states
   const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
-  const [hasNextPage, setHasNextPage] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [hasMoreUp, setHasMoreUp] = useState(false);
 
   // Upward infinite scroll pagination refs
   const chatMessagesRef = useRef<HTMLDivElement | null>(null);
-  const nextPageUrlRef = useRef<string | null>(null);
+  // Cursor: the smallest message id currently loaded; used to fetch older messages
+  const oldestMessageIdRef = useRef<number | null>(null);
   const isLoadingOlderMessagesRef = useRef<boolean>(false);
-  const lastFetchedUrlRef = useRef<string | null>(null);
+  // Prevent fetching the same cursor twice in a row
+  const lastFetchedOldestIdRef = useRef<number | null>(null);
   const scrollSnapshotRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
-  const prevScrollHeightRef = useRef<number>(0);
   const initialLoadCompleteRef = useRef<boolean>(false);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -75,6 +72,8 @@ const ChatRoom: React.FC = () => {
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
   const [editingText, setEditingText] = useState("");
   const [sendError, setSendError] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [pendingMessageIds, setPendingMessageIds] = useState<Set<number>>(
     new Set(),
   );
@@ -101,6 +100,7 @@ const ChatRoom: React.FC = () => {
       file: message.file ?? null,
       reply_to: message.reply_to ?? null,
       reads: message.reads ?? [],
+      is_edited: Boolean((message as any).is_edited),
     }),
     [selfUserId],
   );
@@ -168,8 +168,25 @@ const ChatRoom: React.FC = () => {
             new Date(right.created_at).getTime(),
         );
       });
+
+      // Update the room's last_message in the sidebar only for real
+      // (server-confirmed) messages — skip optimistic/pending ones (negative id).
+      if (normalized.id > 0 && room_id) {
+        dispatch(
+          setRoomLastMessage({
+            roomId: Number(room_id),
+            last_message: {
+              id: normalized.id,
+              text: normalized.text,
+              type: normalized.type,
+              sender: normalized.sender,
+              created_at: normalized.created_at,
+            },
+          }),
+        );
+      }
     },
-    [normalizeMessage, pendingMessageIds],
+    [normalizeMessage, pendingMessageIds, dispatch, room_id],
   );
 
   const updateMessageReads = useCallback(
@@ -304,6 +321,7 @@ const ChatRoom: React.FC = () => {
     sendRead,
     sendDelete,
     sendUpdate,
+    sendFile: socketSendFile,
   } = useChatWebSocket(room_id, handleServerEvent);
 
   sendReadRef.current = sendRead;
@@ -329,31 +347,37 @@ const ChatRoom: React.FC = () => {
       setLoadingMessages(true);
 
       // Reset pagination states before loading new room messages
-      nextPageUrlRef.current = null;
-      setHasNextPage(false);
-      setCurrentPage(1);
-      lastFetchedUrlRef.current = null;
+      oldestMessageIdRef.current = null;
+      lastFetchedOldestIdRef.current = null;
+      setHasMoreUp(false);
       scrollSnapshotRef.current = null;
       initialLoadCompleteRef.current = false;
-      prevScrollHeightRef.current = 0;
 
-      const response = await axiosAPI.get<{ next: string | null; results: MessageData[] }>(
-        `room/${room_id}/messages/?limit=30`,
-      );
+      const response = await axiosAPI.get<{
+        results: MessageData[];
+        pagination: {
+          has_more_up: boolean;
+          has_more_down: boolean;
+          first_id: number;
+          last_id: number;
+          count: number;
+        };
+      }>(`room/${room_id}/messages/?limit=10`);
+
       if (response.status === 200) {
-        setMessages(
-          response.data.results
-            .map((item: MessageData) => normalizeMessage(item))
-            .sort(
-              (left: MessageData, right: MessageData) =>
-                new Date(left.created_at).getTime() -
-                new Date(right.created_at).getTime(),
-            ),
-        );
+        const sorted = response.data.results
+          .map((item: MessageData) => normalizeMessage(item))
+          .sort(
+            (left: MessageData, right: MessageData) =>
+              new Date(left.created_at).getTime() -
+              new Date(right.created_at).getTime(),
+          );
+        setMessages(sorted);
 
-        // Store the pagination cursor link
-        nextPageUrlRef.current = response.data.next;
-        setHasNextPage(Boolean(response.data.next));
+        // Store the oldest message id as the cursor for loading older pages
+        const pagination = response.data.pagination;
+        oldestMessageIdRef.current = pagination?.first_id ?? null;
+        setHasMoreUp(Boolean(pagination?.has_more_up));
         initialLoadCompleteRef.current = true;
       }
     } catch (error) {
@@ -391,110 +415,82 @@ const ChatRoom: React.FC = () => {
     }
   }, [messages]);
 
-  // Load older messages (previous page)
+  // Load older messages using cursor-based pagination (before_id)
   const loadOlderMessages = useCallback(async () => {
-    const url = nextPageUrlRef.current;
+    const beforeId = oldestMessageIdRef.current;
 
-    // Check if there's a next page URL and we're not already loading
-    if (!url) {
-      console.log('No next page URL available');
-      return;
-    }
+    // No cursor means we haven't loaded initial messages yet or already at the top
+    if (!beforeId) return;
 
-    if (isLoadingOlderMessagesRef.current) {
-      console.log('Already loading older messages');
-      return;
-    }
+    // Already in-flight
+    if (isLoadingOlderMessagesRef.current) return;
 
-    // Guard: Prevent double-fetching the same URL
-    if (lastFetchedUrlRef.current === url) {
-      console.log('Already fetched this URL:', url);
-      return;
-    }
+    // Guard: same cursor was just fetched – don't repeat
+    if (lastFetchedOldestIdRef.current === beforeId) return;
 
-    console.log('Loading older messages from:', url);
-
-    // Acquire loading locks
+    // Acquire loading lock
     isLoadingOlderMessagesRef.current = true;
+    lastFetchedOldestIdRef.current = beforeId;
     setIsLoadingOlderMessages(true);
-    lastFetchedUrlRef.current = url;
 
-    // Take scroll snapshot of the container before DOM modifications
+    // Snapshot scroll position so we can restore it after prepending messages
     const container = chatMessagesRef.current;
     if (container) {
       scrollSnapshotRef.current = {
         scrollHeight: container.scrollHeight,
         scrollTop: container.scrollTop,
       };
-      prevScrollHeightRef.current = container.scrollHeight;
     }
 
     try {
-      const response = await axiosAPI.get<{ next: string | null; results: MessageData[] }>(url);
+      const response = await axiosAPI.get<{
+        results: MessageData[];
+        pagination: {
+          has_more_up: boolean;
+          has_more_down: boolean;
+          first_id: number;
+          last_id: number;
+          count: number;
+        };
+      }>(`room/${room_id}/messages/?before_id=${beforeId}&limit=10`);
+
       if (response.status === 200) {
-        const oldMessages = response.data.results
+        const pagination = response.data.pagination;
+        const fetchedMessages = response.data.results
           .map((item) => normalizeMessage(item))
           .sort(
-            (left, right) =>
-              new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
+            (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
           );
 
-        if (oldMessages.length > 0) {
+        if (fetchedMessages.length > 0) {
           setMessages((prev) => {
-            // Deduplicate to prevent race conditions or duplicate websocket prepends
             const existingIds = new Set(prev.map((msg) => msg.id));
-            const uniqueOld = oldMessages.filter((msg) => !existingIds.has(msg.id));
-
-            if (uniqueOld.length === 0) {
-              console.log('All older messages already exist, moving to next page');
-              // If all messages are duplicates, try next page
-              nextPageUrlRef.current = response.data.next;
-              setHasNextPage(Boolean(response.data.next));
-              lastFetchedUrlRef.current = null; // Reset to allow next fetch
-
-              // Release loading locks before recursive call
-              isLoadingOlderMessagesRef.current = false;
-              setIsLoadingOlderMessages(false);
-              scrollSnapshotRef.current = null;
-
-              // Recursively try next page if available
-              if (response.data.next) {
-                setTimeout(() => loadOlderMessages(), 100);
-              }
-              return prev;
-            }
-
-            const mergedMessages = [...uniqueOld, ...prev].sort(
-              (left, right) =>
-                new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
+            const uniqueNew = fetchedMessages.filter((msg) => !existingIds.has(msg.id));
+            if (uniqueNew.length === 0) return prev;
+            return [...uniqueNew, ...prev].sort(
+              (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
             );
-
-            return mergedMessages;
           });
 
-          // Update pagination endpoint cursor and page index
-          nextPageUrlRef.current = response.data.next;
-          setHasNextPage(Boolean(response.data.next));
-          setCurrentPage((prevPage) => prevPage + 1);
-
-          console.log('Loaded older messages, has next page:', Boolean(response.data.next));
+          // Update cursor to the oldest id in this new batch
+          oldestMessageIdRef.current = pagination?.first_id ?? null;
+          setHasMoreUp(Boolean(pagination?.has_more_up));
         } else {
-          // Empty results list indicates we have fully reached the beginning
-          nextPageUrlRef.current = null;
-          setHasNextPage(false);
-          console.log('No more older messages to load');
+          // Empty result – reached the very beginning
+          setHasMoreUp(false);
+          oldestMessageIdRef.current = null;
         }
       }
     } catch (error) {
       console.error("Error loading older messages:", error);
-      // Clean snapshot in case of failure to avoid stuck state
       scrollSnapshotRef.current = null;
+      // Reset the guard so a retry is possible
+      lastFetchedOldestIdRef.current = null;
     } finally {
-      // Release loading locks
       isLoadingOlderMessagesRef.current = false;
       setIsLoadingOlderMessages(false);
     }
-  }, [normalizeMessage]);
+  }, [room_id, normalizeMessage]);
 
   // Synchronously restore scroll position before browser repaints
   useLayoutEffect(() => {
@@ -520,34 +516,30 @@ const ChatRoom: React.FC = () => {
     }
   }, [messages]);
 
-  // Monitor scroll height ticks to trigger loading older messages
+  // Monitor scroll position to trigger loading older messages when near the top
   const handleScroll = useCallback(() => {
     const container = chatMessagesRef.current;
     if (!container || !initialLoadCompleteRef.current) return;
 
-    // Clear previous timeout to debounce scroll events
+    // Debounce scroll handling
     if (scrollTimeoutRef.current) {
       clearTimeout(scrollTimeoutRef.current);
     }
 
-    // Debounce scroll handling
     scrollTimeoutRef.current = setTimeout(() => {
-      // Trigger when scrolled close to the top boundary (threshold <= 50px)
-      const isNearTop = container.scrollTop <= 50;
+      // Trigger when within 80px of the top of the scroll container
+      const isNearTop = container.scrollTop <= 80;
 
-      console.log('Scroll check:', {
-        scrollTop: container.scrollTop,
-        isNearTop,
-        hasNextPage: Boolean(nextPageUrlRef.current),
-        isLoading: isLoadingOlderMessagesRef.current
-      });
-
-      if (isNearTop && nextPageUrlRef.current && !isLoadingOlderMessagesRef.current) {
-        console.log('Triggering loadOlderMessages');
+      if (
+        isNearTop &&
+        hasMoreUp &&
+        oldestMessageIdRef.current !== null &&
+        !isLoadingOlderMessagesRef.current
+      ) {
         loadOlderMessages();
       }
-    }, 150); // 150ms debounce
-  }, [loadOlderMessages]);
+    }, 150);
+  }, [loadOlderMessages, hasMoreUp]);
 
   // Clean up scroll timeout on unmount
   useEffect(() => {
@@ -686,28 +678,49 @@ const ChatRoom: React.FC = () => {
     pendingMessageIds,
   ]);
 
-  const handleInputChange = (value: string) => {
-    setMessage(value);
-    if (!value.trim()) {
-      socketSendTyping(false);
-      return;
-    }
-    socketSendTyping(true);
-  };
+  const handleInputChange = useCallback(
+    (value: string) => {
+      setMessage(value);
+      if (!value.trim()) {
+        socketSendTyping(false);
+        return;
+      }
+      socketSendTyping(true);
+    },
+    [socketSendTyping],
+  );
 
-  const handleSendMessage = () => {
-    if (!message.trim()) return;
+  const handleInputBlur = useCallback(() => {
+    socketSendTyping(false);
+  }, [socketSendTyping]);
+
+  const handleAttachmentSelected = useCallback(
+    (file: File | null, error?: string) => {
+      if (error) {
+        setSendError(error);
+        return;
+      }
+      setSendError(null);
+      setSelectedFile(file);
+    },
+    [],
+  );
+
+  const handleAttachmentClear = useCallback(() => {
+    setSelectedFile(null);
+  }, []);
+
+  const handleSendMessage = useCallback(async () => {
+    if (!message.trim() && !selectedFile) return;
 
     setSendError(null);
 
-    // Generate temporary negative ID for optimistic update to avoid colliding with server IDs
     const tempId = -Date.now();
-
-    // Create optimistic message
+    const createdAt = new Date().toISOString();
     const optimisticMessage: MessageData = {
       id: tempId,
-      type: "text",
-      text: message,
+      type: selectedFile ? "file" : "text",
+      text: selectedFile ? selectedFile.name : message,
       is_my: true,
       sender: {
         id: selfUserId || 0,
@@ -715,39 +728,49 @@ const ChatRoom: React.FC = () => {
         avatar: null,
       },
       reads: [],
-      file: null,
+      is_edited: false,
+      file: selectedFile,
       reply_to: null,
-      created_at: new Date().toISOString(),
+      created_at: createdAt,
     };
 
-    // Add to messages immediately (optimistic update)
     upsertMessage(optimisticMessage);
     pendingMessageSignaturesRef.current[tempId] = {
-      text: message.trim(),
-      created_at: optimisticMessage.created_at,
+      text: optimisticMessage.text.trim(),
+      created_at: createdAt,
     };
 
-    // Mark as pending
     setPendingMessageIds((prev) => new Set([...prev, tempId]));
 
-    const wasSent = socketSendMessage(message);
+    let wasSent = false;
+    if (selectedFile) {
+      setUploadProgress(0);
+      wasSent = await socketSendFile(selectedFile, (p) => setUploadProgress(p));
+      // ensure 100% on completion
+      setUploadProgress((prev) => (wasSent ? 100 : prev));
+    } else {
+      wasSent = socketSendMessage(message);
+    }
+
     if (!wasSent) {
       setSendError(
         "Xabarni jo'nata olmadik. Iltimos, tarmoqqa ulanganingizni tekshiring.",
       );
-      // Remove from pending on error
       setPendingMessageIds((prev) => {
         const updated = new Set(prev);
         updated.delete(tempId);
         return updated;
       });
       delete pendingMessageSignaturesRef.current[tempId];
+      setUploadProgress(null);
       return;
     }
 
     setMessage("");
+    setSelectedFile(null);
+    setUploadProgress(null);
     socketSendTyping(false);
-  };
+  }, [message, selectedFile, selfUserId, socketSendMessage, socketSendTyping, socketSendFile, upsertMessage]);
 
   const handleDelete = (messageId: number) => {
     if (!window.confirm("Xabarni o'chirmoqchimisiz?")) return;
@@ -912,10 +935,10 @@ const ChatRoom: React.FC = () => {
           onScroll={handleScroll}
         >
           {isLoadingOlderMessages && (
-            <div className={styless.loading_text}>Kattaroq xabarlar yuklanmoqda...</div>
+            <div className={styless.loading_text}>Eski xabarlar yuklanmoqda...</div>
           )}
 
-          {hasNextPage && !isLoadingOlderMessages && (
+          {hasMoreUp && !isLoadingOlderMessages && (
             <div className={styless.load_more_container}>
               <button
                 className={styless.load_more_btn}
@@ -998,10 +1021,15 @@ const ChatRoom: React.FC = () => {
                       <span className={styless.message_time}>
                         {formatDateTime(msg.created_at)}
                       </span>
+                      {msg.is_edited && (
+                        <span className={styless.message_edited}>
+                          (tahrirlandi)
+                        </span>
+                      )}
                       {msg.is_my && (
                         <MessageStatusIcon
                           status={getMessageStatus(
-                            msg.id,
+                          msg.id,
                             pendingMessageIds.has(msg.id),
                             msg.reads?.length ?? 0,
                           )}
@@ -1041,35 +1069,16 @@ const ChatRoom: React.FC = () => {
           <div ref={messagesEndRef} />
         </div>
 
-        <div className={styless.chat_input_wrapper}>
-          <button className={styless.attach_btn} type="button">
-            <Paperclip size={20} />
-          </button>
-
-          <div className={styless.chat_input_box}>
-            <textarea
-              placeholder="Xabar yozing..."
-              value={message}
-              onChange={(e) => handleInputChange(e.target.value)}
-              onBlur={() => socketSendTyping(false)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  handleSendMessage();
-                }
-              }}
-              rows={1}
-            />
-          </div>
-
-          <button
-            className={styless.send_btn}
-            onClick={handleSendMessage}
-            type="button"
-          >
-            <SendHorizonal size={20} />
-          </button>
-        </div>
+        <ChatInput
+          message={message}
+          attachment={selectedFile}
+          uploadProgress={uploadProgress}
+          onMessageChange={handleInputChange}
+          onSendMessage={handleSendMessage}
+          onBlur={handleInputBlur}
+          onAttachmentSelected={handleAttachmentSelected}
+          onAttachmentClear={handleAttachmentClear}
+        />
 
         {sendError && <div className={styless.input_error}>{sendError}</div>}
       </div>

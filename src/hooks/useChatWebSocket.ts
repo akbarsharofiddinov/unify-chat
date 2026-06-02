@@ -13,7 +13,8 @@ type SocketStatus =
 
 interface SendMessagePayload {
   type: "message";
-  text: string;
+  text?: string;
+  file?: File | Blob | ArrayBuffer;
   msg_type: ClientMessageType;
   reply_to: number | null;
 }
@@ -162,14 +163,45 @@ export function useChatWebSocket(
       return false;
     }
 
+    if (payload.type === "message" && payload.msg_type === "file" && payload.file) {
+      const metadata = {
+        type: payload.type,
+        msg_type: payload.msg_type,
+        reply_to: payload.reply_to,
+      };
+      const separator = "\n\n";
+      const blob = new Blob([JSON.stringify(metadata), separator, payload.file]);
+      socket.send(blob);
+      return true;
+    }
+
     socket.send(JSON.stringify(payload));
     return true;
   }, []);
 
   const sendMessage = useCallback(
-    (text: string, msgType: ClientMessageType = "text", replyTo: number | null = null) => {
-      if (!text.trim()) return false;
-      return sendPayload({ type: "message", text: text.trim(), msg_type: msgType, reply_to: replyTo });
+    (
+      textOrFile: string | File | Blob,
+      msgType: ClientMessageType = "text",
+      replyTo: number | null = null,
+    ) => {
+      if (msgType === "file") {
+        if (!(textOrFile instanceof Blob)) return false;
+        return sendPayload({
+          type: "message",
+          file: textOrFile,
+          msg_type: msgType,
+          reply_to: replyTo,
+        });
+      }
+
+      if (typeof textOrFile !== "string" || !textOrFile.trim()) return false;
+      return sendPayload({
+        type: "message",
+        text: textOrFile.trim(),
+        msg_type: msgType,
+        reply_to: replyTo,
+      });
     },
     [sendPayload],
   );
@@ -219,6 +251,67 @@ export function useChatWebSocket(
       return sendPayload({ type: "update", message_id: messageId, text: text.trim() });
     },
     [sendPayload],
+  );
+
+  const sendFile = useCallback(
+    async (
+      file: Blob,
+      onProgress?: (percent: number) => void,
+      msgType: ClientMessageType = "file",
+      replyTo: number | null = null,
+    ): Promise<boolean> => {
+      const socket = wsRef.current;
+      if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+
+      try {
+        const metadata = {
+          type: "message",
+          msg_type: msgType,
+          reply_to: replyTo,
+        };
+
+        const separator = "\n\n";
+        // Combine metadata and file into a single Blob so server receives both together
+        const blob = new Blob([JSON.stringify(metadata), separator, file]);
+
+        const total = (file as any).size ?? (blob as Blob).size;
+
+        // Send the combined blob in one shot
+        socket.send(blob);
+
+        // Approximate progress using bufferedAmount
+        if (onProgress) {
+          const start = Date.now();
+          const maxWait = 120000; // 2 minutes cap
+          const interval = 200;
+
+          const tick = () => {
+            try {
+              const buffered = socket.bufferedAmount || 0;
+              const sent = Math.max(0, total - buffered);
+              const percent = Math.min(100, Math.round((sent / total) * 100));
+              onProgress(percent);
+              if (buffered === 0 || Date.now() - start > maxWait) {
+                onProgress(100);
+                return;
+              }
+              setTimeout(tick, interval);
+            } catch (e) {
+              onProgress(100);
+            }
+          };
+
+          // start polling
+          setTimeout(tick, 50);
+        }
+
+        return true;
+      } catch (err) {
+        console.error("sendFile error:", err);
+        return false;
+      }
+    },
+    [],
   );
 
   const scheduleReconnect = useCallback(() => {
@@ -349,6 +442,7 @@ export function useChatWebSocket(
     sendTyping,
     sendDelete,
     sendUpdate,
+    sendFile,
   };
 }
 
