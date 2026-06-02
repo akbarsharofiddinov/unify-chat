@@ -6,7 +6,10 @@ import {
 } from "@/hooks/useChatWebSocket";
 import { useAppDispatch, useAppSelector } from "@/store/hooks/hooks";
 import { setCurrentChatData } from "@/store/slices/chatInfoSlice";
-import { updateRoomUnreadCount, setRoomLastMessage } from "@/store/slices/chatRoomsSlice";
+import {
+  updateRoomUnreadCount,
+  setRoomLastMessage,
+} from "@/store/slices/chatRoomsSlice";
 import React, {
   useCallback,
   useEffect,
@@ -23,9 +26,12 @@ import {
   ChevronDown,
   ChevronUp,
   Edit3,
+  Eye,
+  FileText,
   Info,
   Search,
   Trash2,
+  Download,
 } from "lucide-react";
 import clsx from "clsx";
 import { formatDateTime } from "@/utils/FormatDateTime";
@@ -33,6 +39,38 @@ import { getMessageStatus } from "@/utils/MessageStatus";
 import { MessageStatusIcon } from "@/components/MessageStatusIcon";
 import { ChatInfoModal } from "@/components";
 import ChatInput from "./ChatInput/ChatInput";
+import FilePreviewer from "@/components/FilePreviewer/FilePreviewer";
+import { toast } from "react-toastify";
+
+const formatFileSize = (size: number) => {
+  if (size >= 1024 * 1024) {
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  if (size >= 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+  return `${size} B`;
+};
+
+const extractFileName = (message: MessageData) => {
+  if (message.file?.name) {
+    return message.file.name;
+  }
+
+  if (message.file_url) {
+    try {
+      return (
+        new URL(message.file_url, window.location.origin).pathname
+          .split("/")
+          .pop() ?? "Fayl"
+      );
+    } catch {
+      return message.file_url.split("/").pop() ?? "Fayl";
+    }
+  }
+
+  return message.text || "Fayl";
+};
 
 const calculateIsMy = (message: MessageData, selfUserId: number | null) => {
   if (message.sender?.id != null && selfUserId != null) {
@@ -52,6 +90,7 @@ const ChatRoom: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [currentMatchIndex, setCurrentMatchIndex] = useState<number>(-1);
   const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
+  const [filePreview, setFilePreview] = useState<string>("");
 
   // Upward infinite scroll pagination states
   const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
@@ -64,9 +103,12 @@ const ChatRoom: React.FC = () => {
   const isLoadingOlderMessagesRef = useRef<boolean>(false);
   // Prevent fetching the same cursor twice in a row
   const lastFetchedOldestIdRef = useRef<number | null>(null);
-  const scrollSnapshotRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
+  const scrollSnapshotRef = useRef<{
+    scrollHeight: number;
+    scrollTop: number;
+  } | null>(null);
   const initialLoadCompleteRef = useRef<boolean>(false);
-  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [typingUsers, setTypingUsers] = useState<MembarData[]>([]);
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
@@ -89,7 +131,7 @@ const ChatRoom: React.FC = () => {
   );
 
   const readSentRef = useRef<Set<number>>(new Set());
-  const typingTimersRef = useRef<Record<number, number>>({});
+  const typingTimersRef = useRef<Record<string, number>>({});
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const previousLastMessageId = useRef<number | null>(null);
 
@@ -98,6 +140,7 @@ const ChatRoom: React.FC = () => {
       ...message,
       is_my: calculateIsMy(message, selfUserId),
       file: message.file ?? null,
+      file_url: message.file_url ?? null,
       reply_to: message.reply_to ?? null,
       reads: message.reads ?? [],
       is_edited: Boolean((message as any).is_edited),
@@ -217,12 +260,12 @@ const ChatRoom: React.FC = () => {
         msg.id !== messageId
           ? msg
           : {
-            ...msg,
-            text: "Xabar o'chirildi",
-            type: "text",
-            reply_to: null,
-            reads: msg.reads ?? [],
-          },
+              ...msg,
+              text: "Xabar o'chirildi",
+              type: "text",
+              reply_to: null,
+              reads: msg.reads ?? [],
+            },
       ),
     );
   }, []);
@@ -241,10 +284,11 @@ const ChatRoom: React.FC = () => {
     [],
   );
 
-  const clearTypingTimer = useCallback((userId: number) => {
-    if (typingTimersRef.current[userId]) {
-      window.clearTimeout(typingTimersRef.current[userId]);
-      delete typingTimersRef.current[userId];
+  const clearTypingTimer = useCallback((userId: number | string) => {
+    const key = String(userId);
+    if (typingTimersRef.current[key]) {
+      window.clearTimeout(typingTimersRef.current[key]);
+      delete typingTimersRef.current[key];
     }
   }, []);
 
@@ -273,13 +317,11 @@ const ChatRoom: React.FC = () => {
           clearTypingTimer(event.user_id.id);
           if (event.is_typing) {
             reportTypingUser(event.user_id, true);
-            typingTimersRef.current[event.user_id.id] = window.setTimeout(
-              () => {
+            typingTimersRef.current[String(event.user_id.id)] =
+              window.setTimeout(() => {
                 reportTypingUser(event.user_id, false);
                 clearTypingTimer(event.user_id.id);
-              },
-              3000,
-            );
+              }, 3000);
           } else {
             reportTypingUser(event.user_id, false);
           }
@@ -321,12 +363,12 @@ const ChatRoom: React.FC = () => {
     sendRead,
     sendDelete,
     sendUpdate,
-    sendFile: socketSendFile,
+    sendFileId: socketSendFileId,
   } = useChatWebSocket(room_id, handleServerEvent);
 
   sendReadRef.current = sendRead;
 
-  const { currentUserInfo } = useAppSelector(state => state.chatInfo)
+  const { currentUserInfo } = useAppSelector((state) => state.chatInfo);
 
   const fetchRoomData = useCallback(async () => {
     try {
@@ -387,6 +429,32 @@ const ChatRoom: React.FC = () => {
     }
   }, [room_id, normalizeMessage]);
 
+  const handleDownload = async (fileUrl: string) => {
+    if (!fileUrl) {
+      toast.error("Fayl manzili topilmadi");
+      return;
+    }
+    try {
+      const response = await fetch(`https://chat.m-gaz.uz${fileUrl}`);
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = fileUrl.split(".")[1];
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+      } else {
+        throw new Error("Network response was not ok");
+      }
+    } catch (error) {
+      console.log(error);
+      toast.error("Faylni yuklab olishda xatolik yuz berdi");
+    }
+  };
+
   useEffect(() => {
     if (room_id) {
       Promise.resolve().then(() => {
@@ -400,6 +468,7 @@ const ChatRoom: React.FC = () => {
       readSentRef.current.clear();
       previousLastMessageId.current = null;
     }
+    setFilePreview("");
   }, [room_id, fetchRoomData, fetchMessages]);
 
   useEffect(() => {
@@ -459,16 +528,22 @@ const ChatRoom: React.FC = () => {
         const fetchedMessages = response.data.results
           .map((item) => normalizeMessage(item))
           .sort(
-            (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+            (a, b) =>
+              new Date(a.created_at).getTime() -
+              new Date(b.created_at).getTime(),
           );
 
         if (fetchedMessages.length > 0) {
           setMessages((prev) => {
             const existingIds = new Set(prev.map((msg) => msg.id));
-            const uniqueNew = fetchedMessages.filter((msg) => !existingIds.has(msg.id));
+            const uniqueNew = fetchedMessages.filter(
+              (msg) => !existingIds.has(msg.id),
+            );
             if (uniqueNew.length === 0) return prev;
             return [...uniqueNew, ...prev].sort(
-              (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+              (a, b) =>
+                new Date(a.created_at).getTime() -
+                new Date(b.created_at).getTime(),
             );
           });
 
@@ -504,11 +579,11 @@ const ChatRoom: React.FC = () => {
       // Adjust scrollTop relative to the height difference of prepended messages
       container.scrollTop = scrollTop + heightDifference;
 
-      console.log('Restored scroll position:', {
+      console.log("Restored scroll position:", {
         oldHeight: scrollHeight,
         newHeight: newScrollHeight,
         difference: heightDifference,
-        newScrollTop: container.scrollTop
+        newScrollTop: container.scrollTop,
       });
 
       // Clean up snapshotted state
@@ -566,7 +641,7 @@ const ChatRoom: React.FC = () => {
       (msg) =>
         msg.text &&
         msg.text !== "Xabar o'chirildi" &&
-        msg.text.toLowerCase().includes(query)
+        msg.text.toLowerCase().includes(query),
     );
   }, [messages, searchQuery]);
 
@@ -605,14 +680,14 @@ const ChatRoom: React.FC = () => {
   const handlePrevMatch = useCallback(() => {
     if (matchedMessages.length === 0) return;
     setCurrentMatchIndex((prev) =>
-      prev <= 0 ? matchedMessages.length - 1 : prev - 1
+      prev <= 0 ? matchedMessages.length - 1 : prev - 1,
     );
   }, [matchedMessages]);
 
   const handleNextMatch = useCallback(() => {
     if (matchedMessages.length === 0) return;
     setCurrentMatchIndex((prev) =>
-      prev >= matchedMessages.length - 1 ? 0 : prev + 1
+      prev >= matchedMessages.length - 1 ? 0 : prev + 1,
     );
   }, [matchedMessages]);
 
@@ -632,7 +707,7 @@ const ChatRoom: React.FC = () => {
             key={idx}
             className={clsx(
               styless.highlight,
-              isActive && styless.highlight_active
+              isActive && styless.highlight_active,
             )}
           >
             {part}
@@ -642,7 +717,7 @@ const ChatRoom: React.FC = () => {
         );
       });
     },
-    []
+    [],
   );
 
   useEffect(() => {
@@ -651,7 +726,7 @@ const ChatRoom: React.FC = () => {
       .filter(
         (msg) =>
           !msg.reads?.some(
-            (read: { user: { id: number } }) => read.user.id === selfUserId,
+            (read) => String(read.user.id) === String(selfUserId),
           ) &&
           !readSentRef.current.has(msg.id) &&
           !pendingMessageIds.has(msg.id),
@@ -730,6 +805,7 @@ const ChatRoom: React.FC = () => {
       reads: [],
       is_edited: false,
       file: selectedFile,
+      file_url: null,
       reply_to: null,
       created_at: createdAt,
     };
@@ -745,9 +821,37 @@ const ChatRoom: React.FC = () => {
     let wasSent = false;
     if (selectedFile) {
       setUploadProgress(0);
-      wasSent = await socketSendFile(selectedFile, (p) => setUploadProgress(p));
-      // ensure 100% on completion
-      setUploadProgress((prev) => (wasSent ? 100 : prev));
+
+      try {
+        if (!isConnected) {
+          throw new Error("Realtime connection is not available.");
+        }
+
+        const formData = new FormData();
+        formData.append("file", selectedFile);
+
+        const response = await axiosAPI.post("upload/", formData, {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+          onUploadProgress: (event) => {
+            if (event.total) {
+              setUploadProgress(Math.round((event.loaded / event.total) * 100));
+            }
+          },
+        });
+
+        const fileId = response.data?.id ?? response.data?.file_id ?? null;
+        if (fileId == null) {
+          throw new Error("Upload response did not return a file ID.");
+        }
+
+        wasSent = socketSendFileId(fileId);
+        setUploadProgress((prev) => (wasSent ? 100 : prev));
+      } catch (error) {
+        console.error("File upload failed", error);
+        wasSent = false;
+      }
     } else {
       wasSent = socketSendMessage(message);
     }
@@ -770,7 +874,16 @@ const ChatRoom: React.FC = () => {
     setSelectedFile(null);
     setUploadProgress(null);
     socketSendTyping(false);
-  }, [message, selectedFile, selfUserId, socketSendMessage, socketSendTyping, socketSendFile, upsertMessage]);
+  }, [
+    message,
+    selectedFile,
+    selfUserId,
+    socketSendMessage,
+    socketSendTyping,
+    socketSendFileId,
+    upsertMessage,
+    isConnected,
+  ]);
 
   const handleDelete = (messageId: number) => {
     if (!window.confirm("Xabarni o'chirmoqchimisiz?")) return;
@@ -921,7 +1034,10 @@ const ChatRoom: React.FC = () => {
                 <button onClick={() => setIsSearchOpen(true)} title="Qidirish">
                   <Search size={20} />
                 </button>
-                <button onClick={() => setIsInfoModalOpen(true)} title="Guruh/Chat ma'lumotlari">
+                <button
+                  onClick={() => setIsInfoModalOpen(true)}
+                  title="Guruh/Chat ma'lumotlari"
+                >
                   <Info size={20} />
                 </button>
               </div>
@@ -929,158 +1045,225 @@ const ChatRoom: React.FC = () => {
           )}
         </header>
 
-        <div
-          className={styless.chat_messages}
-          ref={chatMessagesRef}
-          onScroll={handleScroll}
-        >
-          {isLoadingOlderMessages && (
-            <div className={styless.loading_text}>Eski xabarlar yuklanmoqda...</div>
-          )}
-
-          {hasMoreUp && !isLoadingOlderMessages && (
-            <div className={styless.load_more_container}>
-              <button
-                className={styless.load_more_btn}
-                onClick={loadOlderMessages}
-              >
-                Eski xabarlarni yuklash
-              </button>
-            </div>
-          )}
-
-          <div className={styless.messages_date}>
-            <span>Bugun</span>
-          </div>
-
-          {messages.map((msg) => (
+        {filePreview ? (
+          <FilePreviewer
+            file_url={`https://chat.m-gaz.uz${filePreview}`}
+            onClose={() => setFilePreview("")}
+          />
+        ) : (
+          <>
             <div
-              key={msg.id}
-              id={`msg-${msg.id}`}
-              className={clsx(
-                styless.message_wrapper,
-                msg.is_my
-                  ? styless.message_wrapper_me
-                  : styless.message_wrapper_other,
-              )}
+              className={styless.chat_messages}
+              ref={chatMessagesRef}
+              onScroll={handleScroll}
             >
-              <div
-                className={clsx(
-                  styless.message,
-                  msg.is_my ? styless.message_me : styless.message_other,
-                  msg.text === "Xabar o'chirildi" && styless.message_deleted,
-                )}
-              >
-                {!msg.is_my && (
-                  <span className={styless.message_sender}>
-                    {msg.sender?.full_name}
-                  </span>
-                )}
+              {isLoadingOlderMessages && (
+                <div className={styless.loading_text}>
+                  Eski xabarlar yuklanmoqda...
+                </div>
+              )}
 
-                {editingMessageId === msg.id ? (
-                  <div className={styless.message_edit_form}>
-                    <textarea
-                      value={editingText}
-                      onChange={(event) => setEditingText(event.target.value)}
-                      className={styless.message_edit_textarea}
-                      rows={2}
-                    />
-                    <div className={styless.message_actions}>
-                      <button
-                        className={styless.message_action_button}
-                        type="button"
-                        onClick={handleEditSave}
-                      >
-                        <Check size={16} />
-                      </button>
-                      <button
-                        className={styless.message_action_button}
-                        type="button"
-                        onClick={handleEditCancel}
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <p
-                      className={
-                        msg.text === "Xabar o'chirildi"
-                          ? styless.deleted_text
-                          : ""
-                      }
-                    >
-                      {renderHighlightedText(
-                        msg.text,
-                        searchQuery,
-                        matchedMessages[currentMatchIndex]?.id === msg.id
-                      )}
-                    </p>
-                    <div className={styless.message_footer}>
-                      <span className={styless.message_time}>
-                        {formatDateTime(msg.created_at)}
-                      </span>
-                      {msg.is_edited && (
-                        <span className={styless.message_edited}>
-                          (tahrirlandi)
-                        </span>
-                      )}
-                      {msg.is_my && (
-                        <MessageStatusIcon
-                          status={getMessageStatus(
-                          msg.id,
-                            pendingMessageIds.has(msg.id),
-                            msg.reads?.length ?? 0,
-                          )}
-                        />
-                      )}
-                    </div>
-                  </>
-                )}
+              {hasMoreUp && !isLoadingOlderMessages && (
+                <div className={styless.load_more_container}>
+                  <button
+                    className={styless.load_more_btn}
+                    onClick={loadOlderMessages}
+                  >
+                    Eski xabarlarni yuklash
+                  </button>
+                </div>
+              )}
 
-                {msg.is_my &&
-                  editingMessageId !== msg.id &&
-                  msg.text !== "Xabar o'chirildi" && (
-                    <div className={styless.message_actions}>
-                      <button
-                        className={styless.message_action_button}
-                        type="button"
-                        onClick={() => handleEditStart(msg.id, msg.text)}
-                      >
-                        <Edit3 size={16} />
-                      </button>
-                      <button
-                        className={styless.message_action_button}
-                        type="button"
-                        onClick={() => handleDelete(msg.id)}
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  )}
+              <div className={styless.messages_date}>
+                <span>Bugun</span>
               </div>
+
+              {messages.map((msg) => (
+                <div
+                  key={msg.id}
+                  id={`msg-${msg.id}`}
+                  className={clsx(
+                    styless.message_wrapper,
+                    msg.is_my
+                      ? styless.message_wrapper_me
+                      : styless.message_wrapper_other,
+                  )}
+                >
+                  <div
+                    className={clsx(
+                      styless.message,
+                      msg.is_my ? styless.message_me : styless.message_other,
+                      msg.text === "Xabar o'chirildi" &&
+                        styless.message_deleted,
+                    )}
+                  >
+                    {!msg.is_my && (
+                      <span className={styless.message_sender}>
+                        {msg.sender?.full_name}
+                      </span>
+                    )}
+
+                    {editingMessageId === msg.id ? (
+                      <div className={styless.message_edit_form}>
+                        <textarea
+                          value={editingText}
+                          onChange={(event) =>
+                            setEditingText(event.target.value)
+                          }
+                          className={styless.message_edit_textarea}
+                          rows={2}
+                        />
+                        <div className={styless.message_actions}>
+                          <button
+                            className={styless.message_action_button}
+                            type="button"
+                            onClick={handleEditSave}
+                          >
+                            <Check size={16} />
+                          </button>
+                          <button
+                            className={styless.message_action_button}
+                            type="button"
+                            onClick={handleEditCancel}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {msg.type === "file" ? (
+                          <div className={styless.file_message_card}>
+                            <div className={styless.file_message_card_meta}>
+                              <div className={styless.file_message_card_info}>
+                                <span
+                                  className={styless.file_message_card_icon}
+                                >
+                                  <FileText size={18} />
+                                </span>
+                                <div>
+                                  <div
+                                    className={styless.file_message_card_name}
+                                  >
+                                    {extractFileName(msg)}
+                                  </div>
+                                  {msg.file?.size ? (
+                                    <div
+                                      className={styless.file_message_card_size}
+                                    >
+                                      {formatFileSize(msg.file.size)}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              </div>
+                              <div
+                                className={styless.file_message_card_actions}
+                              >
+                                {msg.file_url ? (
+                                  <button
+                                    className={styless.file_message_card_button}
+                                    onClick={() => {
+                                      if (msg.file_url) {
+                                        setFilePreview(msg.file_url);
+                                      }
+                                    }}
+                                  >
+                                    <Eye size={16} />
+                                  </button>
+                                ) : null}
+                                {msg.file_url ? (
+                                  <button
+                                    className={styless.file_message_card_button}
+                                    title="Yuklab olish"
+                                    onClick={() => {
+                                      handleDownload(msg.file_url)
+                                    }}
+                                  >
+                                    <Download size={16} />
+                                  </button>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <p
+                            className={
+                              msg.text === "Xabar o'chirildi"
+                                ? styless.deleted_text
+                                : ""
+                            }
+                          >
+                            {renderHighlightedText(
+                              msg.text,
+                              searchQuery,
+                              matchedMessages[currentMatchIndex]?.id === msg.id,
+                            )}
+                          </p>
+                        )}
+                        <div className={styless.message_footer}>
+                          <span className={styless.message_time}>
+                            {formatDateTime(msg.created_at)}
+                          </span>
+                          {msg.is_edited && (
+                            <span className={styless.message_edited}>
+                              (tahrirlandi)
+                            </span>
+                          )}
+                          {msg.is_my && (
+                            <MessageStatusIcon
+                              status={getMessageStatus(
+                                msg.id,
+                                pendingMessageIds.has(msg.id),
+                                msg.reads?.length ?? 0,
+                              )}
+                            />
+                          )}
+                        </div>
+                      </>
+                    )}
+
+                    {msg.is_my &&
+                      editingMessageId !== msg.id &&
+                      msg.text !== "Xabar o'chirildi" && (
+                        <div className={styless.message_actions}>
+                          <button
+                            className={styless.message_action_button}
+                            type="button"
+                            onClick={() => handleEditStart(msg.id, msg.text)}
+                          >
+                            <Edit3 size={16} />
+                          </button>
+                          <button
+                            className={styless.message_action_button}
+                            type="button"
+                            onClick={() => handleDelete(msg.id)}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      )}
+                  </div>
+                </div>
+              ))}
+
+              {loadingMessages && (
+                <div className={styless.loading_text}>Yuklanmoqda...</div>
+              )}
+              <div ref={messagesEndRef} />
             </div>
-          ))}
 
-          {loadingMessages && (
-            <div className={styless.loading_text}>Yuklanmoqda...</div>
-          )}
-          <div ref={messagesEndRef} />
-        </div>
-
-        <ChatInput
-          message={message}
-          attachment={selectedFile}
-          uploadProgress={uploadProgress}
-          onMessageChange={handleInputChange}
-          onSendMessage={handleSendMessage}
-          onBlur={handleInputBlur}
-          onAttachmentSelected={handleAttachmentSelected}
-          onAttachmentClear={handleAttachmentClear}
-        />
-
-        {sendError && <div className={styless.input_error}>{sendError}</div>}
+            <ChatInput
+              message={message}
+              attachment={selectedFile}
+              uploadProgress={uploadProgress}
+              onMessageChange={handleInputChange}
+              onSendMessage={handleSendMessage}
+              onBlur={handleInputBlur}
+              onAttachmentSelected={handleAttachmentSelected}
+              onAttachmentClear={handleAttachmentClear}
+            />
+          </>
+        )}
       </div>
 
       <ChatInfoModal

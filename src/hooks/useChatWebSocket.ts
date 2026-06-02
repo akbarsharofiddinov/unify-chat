@@ -15,6 +15,7 @@ interface SendMessagePayload {
   type: "message";
   text?: string;
   file?: File | Blob | ArrayBuffer;
+  file_id?: number;
   msg_type: ClientMessageType;
   reply_to: number | null;
 }
@@ -163,16 +164,23 @@ export function useChatWebSocket(
       return false;
     }
 
-    if (payload.type === "message" && payload.msg_type === "file" && payload.file) {
-      const metadata = {
-        type: payload.type,
-        msg_type: payload.msg_type,
-        reply_to: payload.reply_to,
-      };
-      const separator = "\n\n";
-      const blob = new Blob([JSON.stringify(metadata), separator, payload.file]);
-      socket.send(blob);
-      return true;
+    if (payload.type === "message" && payload.msg_type === "file") {
+      if (payload.file_id != null) {
+        socket.send(JSON.stringify(payload));
+        return true;
+      }
+
+      if (payload.file) {
+        const metadata = {
+          type: payload.type,
+          msg_type: payload.msg_type,
+          reply_to: payload.reply_to,
+        };
+        const separator = "\n\n";
+        const blob = new Blob([JSON.stringify(metadata), separator, payload.file]);
+        socket.send(blob);
+        return true;
+      }
     }
 
     socket.send(JSON.stringify(payload));
@@ -433,6 +441,17 @@ export function useChatWebSocket(
     };
   }, [roomId, cleanupSocket, setStatusSafe]);
 
+  const sendFileId = useCallback(
+    (fileId: number, replyTo: number | null = null) =>
+      sendPayload({
+        type: "message",
+        msg_type: "file",
+        file_id: fileId,
+        reply_to: replyTo,
+      }),
+    [sendPayload],
+  );
+
   return {
     status,
     lastError,
@@ -443,6 +462,7 @@ export function useChatWebSocket(
     sendDelete,
     sendUpdate,
     sendFile,
+    sendFileId,
   };
 }
 

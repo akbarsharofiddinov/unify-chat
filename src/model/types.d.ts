@@ -32,7 +32,8 @@ interface ChatRoomsResponse extends defaultResponse {
 interface LastMessage {
   id: number;
   created_at: string;
-  sender_id: number;
+  sender_id?: number;
+  sender?: MembarData;
   text: string;
   type: messageType;
 }
@@ -61,7 +62,7 @@ interface RoomData {
 }
 
 interface MembarData {
-  id: number;
+  id: number | string;
   full_name: string;
   avatar: string | null;
 }
@@ -72,6 +73,7 @@ interface MessageData {
   text: string;
   is_edited?: boolean;
   file: File | null;
+  file_url?: string | null;
   is_my: boolean;
   reply_to: number | null;
   sender: MembarData;

@@ -290,6 +290,77 @@
   }
 }
 
+.file_message_card {
+  width: 100%;
+  padding: 12px 14px;
+  margin: 6px 0;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.file_message_card_meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.file_message_card_info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.file_message_card_icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background: #eff6ff;
+  color: #2563eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.file_message_card_name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.file_message_card_size {
+  font-size: 13px;
+  color: #475569;
+}
+
+.file_message_card_actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file_message_card_button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background: white;
+  color: #2563eb;
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  transition: background 0.2s, transform 0.2s;
+}
+
+.file_message_card_button:hover {
+  background: #e0f2fe;
+  transform: translateY(-1px);
+}
+
 /* INPUT */
 
 .chat_input_wrapper {
