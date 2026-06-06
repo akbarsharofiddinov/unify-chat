@@ -42,7 +42,11 @@ const fetchUsersPage = async (url: string): Promise<UsersPageResponse> => {
 
   usersCache.requestUrl = url;
   usersCache.requestPromise = axiosAPI
-    .get(url)
+    .get(url, {
+      headers: {
+        'X-Service-Key': '8901290diheiuqwhuieqw'
+      }
+    })
     .then((response) => {
       if (response.status !== 200) {
         throw new Error(`Unexpected status ${response.status}`);
@@ -252,7 +256,7 @@ const CreateRoomModal: React.FC<IProps> = ({ type, onClose, onSuccess }) => {
 
               <div>
                 <h2>
-                  {isGroup ? "Yangi guruh yaratish" : "Yangi chat boshlash"}
+                  {isGroup ? "Yangi guruh yaratish" : "Yangi chat boshlash fkopwek"}
                 </h2>
 
                 <p>

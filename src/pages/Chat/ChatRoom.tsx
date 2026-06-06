@@ -42,6 +42,68 @@ import ChatInput from "./ChatInput/ChatInput";
 import FilePreviewer from "@/components/FilePreviewer/FilePreviewer";
 import { toast } from "react-toastify";
 
+const IMAGE_EXTENSIONS = [
+  "jpg",
+  "jpeg",
+  "png",
+  "gif",
+  "webp",
+  "bmp",
+  "svg",
+  "avif",
+  "ico",
+  "tiff",
+  "tif",
+  "heic",
+  "heif",
+];
+
+const isImageFile = (fileName: string): boolean => {
+  const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
+  return IMAGE_EXTENSIONS.includes(ext);
+};
+
+interface ImageWithSkeletonProps {
+  src: string;
+  alt: string;
+  className: string;
+  onClick?: () => void;
+}
+
+const ImageWithSkeleton: React.FC<ImageWithSkeletonProps> = ({
+  src,
+  alt,
+  className,
+  onClick,
+}) => {
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState(false);
+
+  return (
+    <div className={styless.image_skeleton_root}>
+      {!loaded && !error && (
+        <div className={styless.image_skeleton_shimmer} />
+      )}
+      {error ? (
+        <div className={styless.image_skeleton_error}>
+          <span>🖼️</span>
+          <span>Rasm yuklanmadi</span>
+        </div>
+      ) : (
+        <img
+          src={src}
+          alt={alt}
+          className={clsx(className, !loaded && styless.image_hidden)}
+          onLoad={() => setLoaded(true)}
+          onError={() => setError(true)}
+          onClick={onClick}
+          loading="lazy"
+        />
+      )}
+    </div>
+  );
+};
+
 const formatFileSize = (size: number) => {
   if (size >= 1024 * 1024) {
     return `${(size / (1024 * 1024)).toFixed(1)} MB`;
@@ -260,12 +322,12 @@ const ChatRoom: React.FC = () => {
         msg.id !== messageId
           ? msg
           : {
-              ...msg,
-              text: "Xabar o'chirildi",
-              type: "text",
-              reply_to: null,
-              reads: msg.reads ?? [],
-            },
+            ...msg,
+            text: "Xabar o'chirildi",
+            type: "text",
+            reply_to: null,
+            reads: msg.reads ?? [],
+          },
       ),
     );
   }, []);
@@ -1094,7 +1156,7 @@ const ChatRoom: React.FC = () => {
                       styless.message,
                       msg.is_my ? styless.message_me : styless.message_other,
                       msg.text === "Xabar o'chirildi" &&
-                        styless.message_deleted,
+                      styless.message_deleted,
                     )}
                   >
                     {!msg.is_my && (
@@ -1132,60 +1194,104 @@ const ChatRoom: React.FC = () => {
                       </div>
                     ) : (
                       <>
-                        {msg.type === "file" ? (
-                          <div className={styless.file_message_card}>
-                            <div className={styless.file_message_card_meta}>
-                              <div className={styless.file_message_card_info}>
-                                <span
-                                  className={styless.file_message_card_icon}
-                                >
-                                  <FileText size={18} />
-                                </span>
-                                <div>
-                                  <div
-                                    className={styless.file_message_card_name}
-                                  >
-                                    {extractFileName(msg)}
-                                  </div>
-                                  {msg.file?.size ? (
-                                    <div
-                                      className={styless.file_message_card_size}
-                                    >
-                                      {formatFileSize(msg.file.size)}
-                                    </div>
-                                  ) : null}
-                                </div>
-                              </div>
-                              <div
-                                className={styless.file_message_card_actions}
-                              >
-                                {msg.file_url ? (
-                                  <button
-                                    className={styless.file_message_card_button}
+                        {msg.type === "file" ? (() => {
+                          const fileName = extractFileName(msg);
+                          const isImage = isImageFile(fileName);
+                          const imageUrl = msg.file_url
+                            ? `https://chat.m-gaz.uz${msg.file_url}`
+                            : msg.file instanceof File && isImage
+                              ? URL.createObjectURL(msg.file)
+                              : null;
+
+                          if (isImage && imageUrl) {
+                            return (
+                              <div className={styless.image_message_wrapper}>
+                                <div className={styless.image_message_container}>
+                                  <ImageWithSkeleton
+                                    src={imageUrl}
+                                    alt={fileName}
+                                    className={styless.image_message_preview}
                                     onClick={() => {
                                       if (msg.file_url) {
                                         setFilePreview(msg.file_url);
                                       }
                                     }}
+                                  />
+                                  {msg.file_url && (
+                                    <button
+                                      className={styless.image_download_btn}
+                                      title="Yuklab olish"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDownload(msg.file_url!);
+                                      }}
+                                    >
+                                      <Download size={14} />
+                                    </button>
+                                  )}
+                                </div>
+                                <div className={styless.image_message_name}>
+                                  {fileName}
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className={styless.file_message_card}>
+                              <div className={styless.file_message_card_meta}>
+                                <div className={styless.file_message_card_info}>
+                                  <span
+                                    className={styless.file_message_card_icon}
                                   >
-                                    <Eye size={16} />
-                                  </button>
-                                ) : null}
-                                {msg.file_url ? (
-                                  <button
-                                    className={styless.file_message_card_button}
-                                    title="Yuklab olish"
-                                    onClick={() => {
-                                      handleDownload(msg.file_url)
-                                    }}
-                                  >
-                                    <Download size={16} />
-                                  </button>
-                                ) : null}
+                                    <FileText size={18} />
+                                  </span>
+                                  <div>
+                                    <div
+                                      className={styless.file_message_card_name}
+                                    >
+                                      {fileName}
+                                    </div>
+                                    {msg.file?.size ? (
+                                      <div
+                                        className={styless.file_message_card_size}
+                                      >
+                                        {formatFileSize(msg.file.size)}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                </div>
+                                <div
+                                  className={styless.file_message_card_actions}
+                                >
+                                  {msg.file_url ? (
+                                    <button
+                                      className={styless.file_message_card_button}
+                                      onClick={() => {
+                                        if (msg.file_url) {
+                                          setFilePreview(msg.file_url);
+                                        }
+                                      }}
+                                    >
+                                      <Eye size={16} />
+                                    </button>
+                                  ) : null}
+                                  {msg.file_url ? (
+                                    <button
+                                      className={styless.file_message_card_button}
+                                      title="Yuklab olish"
+                                      onClick={() => {
+                                        handleDownload(msg.file_url!);
+                                      }}
+                                    >
+                                      <Download size={16} />
+                                    </button>
+                                  ) : null}
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        ) : (
+                          );
+                        })() : (
                           <p
                             className={
                               msg.text === "Xabar o'chirildi"

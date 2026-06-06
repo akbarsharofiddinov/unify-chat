@@ -1,7 +1,7 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useMemo } from "react";
 import styless from "../ChatRoom.module.scss";
 import { SendHorizonal, FileText, X } from "lucide-react";
-import AttachmentButton from "../AttachmentButton/AttachmentButton";
+import AttachmentButton, { MAX_ATTACHMENT_SIZE_BYTES } from "../AttachmentButton/AttachmentButton";
 
 interface ChatInputProps {
   message: string;
@@ -51,6 +51,43 @@ const ChatInput: React.FC<ChatInputProps> = ({
     [onSendMessage],
   );
 
+  const handlePaste = useCallback(
+    (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const items = event.clipboardData?.items;
+      if (!items) return;
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === "file") {
+          const file = item.getAsFile();
+          if (!file) continue;
+
+          event.preventDefault();
+
+          if (file.size > MAX_ATTACHMENT_SIZE_BYTES) {
+            onAttachmentSelected(
+              null,
+              `Fayl hajmi ${MAX_ATTACHMENT_SIZE_BYTES / 1024 / 1024}MB dan oshmasligi kerak.`,
+            );
+            return;
+          }
+
+          onAttachmentSelected(file);
+          return;
+        }
+      }
+    },
+    [onAttachmentSelected],
+  );
+
+  const attachmentPreviewUrl = useMemo(() => {
+    if (!attachment) return null;
+    if (attachment.type.startsWith("image/")) {
+      return URL.createObjectURL(attachment);
+    }
+    return null;
+  }, [attachment]);
+
   return (
     <div className={styless.chat_input_wrapper}>
       <AttachmentButton onFileSelected={onAttachmentSelected} />
@@ -58,9 +95,19 @@ const ChatInput: React.FC<ChatInputProps> = ({
       <div className={styless.chat_input_box}>
         {attachment && (
           <div className={styless.chat_attachment_preview}>
-            <div className={styless.chat_attachment_preview_icon}>
-              <FileText size={18} />
-            </div>
+            {attachmentPreviewUrl ? (
+              <div className={styless.chat_attachment_preview_thumb}>
+                <img
+                  src={attachmentPreviewUrl}
+                  alt={attachment.name}
+                  className={styless.chat_attachment_thumb_img}
+                />
+              </div>
+            ) : (
+              <div className={styless.chat_attachment_preview_icon}>
+                <FileText size={18} />
+              </div>
+            )}
             <div className={styless.chat_attachment_preview_info}>
               <span className={styless.chat_attachment_preview_name}>
                 {attachment.name}
@@ -94,6 +141,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
           onChange={handleChange}
           onBlur={onBlur}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           rows={1}
         />
       </div>

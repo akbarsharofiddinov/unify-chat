@@ -8,7 +8,7 @@ const Layout: React.FC = () => {
 
   return (
     <>
-      <div className={styless.layout}>
+    <div className={styless.layout}>
         <Sidebar />
         <div className={styless.layout_content}>
           <main>
