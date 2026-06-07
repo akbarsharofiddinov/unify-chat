@@ -17,11 +17,11 @@ export const MessageStatusIcon: React.FC<MessageStatusIconProps> = ({ status }) 
   const renderIcon = () => {
     switch (status) {
       case "sending":
-        return <Clock size={14} className={styles.icon_sending} />;
+        return <Clock size={14} className={styles.icon_sending} color="#d1d5de" />;
       case "sent":
-        return <Check size={14} className={styles.icon_sent} />;
+        return <Check size={14} className={styles.icon_sent} color="#d1d5de" />;
       case "read":
-        return <CheckCheck size={14} className={styles.icon_read} />;
+        return <CheckCheck size={14} className={styles.icon_read} color="#d1d5de" />;
     }
   };
 

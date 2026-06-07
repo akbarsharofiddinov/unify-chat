@@ -10,21 +10,21 @@ import { Users, UserRound, X } from "lucide-react";
 import clsx from "clsx";
 import { axiosAPI } from "@/service/axiosAPI";
 
-const USERS_API_URL = "https://v3.ekomplektasiya.uz/api/users/internal/employees/";
+const USERS_API_URL = "https://v3.ekomplektasiya.uz/api/users/all-internal/employees/";
 
-interface UsersPageResponse {
-  results: IUser[];
-  next: string | null;
-  previous: string | null;
-  count: number;
+// Yangi interface - response to'g'ridan-to'g'ri array qaytaradi
+interface IUser {
+  id: number;
+  full_name: string;
+  avatar: string | null;
 }
 
+// Cache strukturasini o'zgartiramiz
 const usersCache = {
   currentSearch: "",
   users: [] as IUser[],
-  nextPageUrl: USERS_API_URL as string | null,
   requestUrl: null as string | null,
-  requestPromise: null as Promise<UsersPageResponse> | null,
+  requestPromise: null as Promise<IUser[]> | null,
 };
 
 const buildUsersUrl = (search: string) => {
@@ -35,24 +35,22 @@ const buildUsersUrl = (search: string) => {
   return url.toString();
 };
 
-const fetchUsersPage = async (url: string): Promise<UsersPageResponse> => {
+// Yangi fetch funksiyasi - to'g'ridan-to'g'ri array qaytaradi
+const fetchUsersPage = async (url: string): Promise<IUser[]> => {
   if (usersCache.requestPromise && usersCache.requestUrl === url) {
     return usersCache.requestPromise;
   }
 
   usersCache.requestUrl = url;
   usersCache.requestPromise = axiosAPI
-    .get(url, {
-      headers: {
-        'X-Service-Key': '8901290diheiuqwhuieqw'
-      }
-    })
+    .get(url)
     .then((response) => {
       if (response.status !== 200) {
         throw new Error(`Unexpected status ${response.status}`);
       }
 
-      return response.data as UsersPageResponse;
+      // Response to'g'ridan-to'g'ri array
+      return response.data as IUser[];
     })
     .catch((error) => {
       usersCache.requestPromise = null;
@@ -78,8 +76,7 @@ const CreateRoomModal: React.FC<IProps> = ({ type, onClose, onSuccess }) => {
   const [usersInitialLoading, setUsersInitialLoading] = useState(false);
   const [usersFetchingMore, setUsersFetchingMore] = useState(false);
   const [users, setUsers] = useState<IUser[]>(usersCache.users);
-  const [nextPageUrl, setNextPageUrl] = useState<string | null>(usersCache.nextPageUrl);
-  const [hasMore, setHasMore] = useState(Boolean(usersCache.nextPageUrl));
+  const [hasMore, setHasMore] = useState(false); // API pagination bo'lmasa, false
   const isFetchingMoreRef = useRef(false);
   const currentSearchRef = useRef(usersCache.currentSearch);
   const debouncedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -125,26 +122,25 @@ const CreateRoomModal: React.FC<IProps> = ({ type, onClose, onSuccess }) => {
     }
   };
 
+  // Yangilangan fetchUsers - pagination yo'q, to'g'ridan-to'g'ri array
   const fetchUsers = useCallback(
     async (search: string) => {
       const url = buildUsersUrl(search);
 
       try {
         setUsersInitialLoading(true);
-        const response = await fetchUsersPage(url);
-        const updatedUsers = response.results;
-
+        const usersData = await fetchUsersPage(url);
+        
         if (currentSearchRef.current !== search) {
           return;
         }
 
-        setUsers(updatedUsers);
-        setNextPageUrl(response.next);
-        setHasMore(Boolean(response.next));
-
+        setUsers(usersData);
+        setHasMore(false); // API pagination qo'llab-quvvatlamaydi
+        
+        // Cacheni yangilash
         usersCache.currentSearch = search;
-        usersCache.users = updatedUsers;
-        usersCache.nextPageUrl = response.next;
+        usersCache.users = usersData;
         usersCache.requestPromise = null;
         usersCache.requestUrl = null;
       } catch (error) {
@@ -156,31 +152,8 @@ const CreateRoomModal: React.FC<IProps> = ({ type, onClose, onSuccess }) => {
     [],
   );
 
-  const fetchMoreUsers = useCallback(async () => {
-    if (!nextPageUrl || usersFetchingMore || isFetchingMoreRef.current) return;
-
-    isFetchingMoreRef.current = true;
-    setUsersFetchingMore(true);
-
-    try {
-      const response = await fetchUsersPage(nextPageUrl);
-      const updatedUsers = [...users, ...response.results];
-
-      setUsers(updatedUsers);
-      setNextPageUrl(response.next);
-      setHasMore(Boolean(response.next));
-
-      usersCache.users = updatedUsers;
-      usersCache.nextPageUrl = response.next;
-      usersCache.requestPromise = null;
-      usersCache.requestUrl = null;
-    } catch (error) {
-      console.log(error);
-    } finally {
-      setUsersFetchingMore(false);
-      isFetchingMoreRef.current = false;
-    }
-  }, [nextPageUrl, users, usersFetchingMore]);
+  // fetchMoreUsers endi ishlatilmaydi, chunki pagination yo'q
+  // Agar kerak bo'lsa, lekin hozircha olib tashlaymiz
 
   useEffect(() => {
     if (usersCache.users.length === 0) {
@@ -211,27 +184,15 @@ const CreateRoomModal: React.FC<IProps> = ({ type, onClose, onSuccess }) => {
     currentSearchRef.current = debouncedSearch;
     usersCache.currentSearch = debouncedSearch;
     usersCache.users = [];
-    usersCache.nextPageUrl = buildUsersUrl(debouncedSearch);
     usersCache.requestPromise = null;
     usersCache.requestUrl = null;
 
     setUsers([]);
-    setNextPageUrl(usersCache.nextPageUrl);
-    setHasMore(Boolean(usersCache.nextPageUrl));
     fetchUsers(debouncedSearch);
   }, [debouncedSearch, fetchUsers]);
 
-  const handleUsersScroll = useCallback(
-    (event: React.UIEvent<HTMLDivElement>) => {
-      const target = event.currentTarget;
-      const reachedBottom = target.scrollHeight - target.scrollTop - target.clientHeight <= 80;
-
-      if (reachedBottom && hasMore && !usersFetchingMore && !usersInitialLoading) {
-        fetchMoreUsers();
-      }
-    },
-    [fetchMoreUsers, hasMore, usersFetchingMore, usersInitialLoading],
-  );
+  // Scroll handler endi ishlatilmaydi (pagination yo'q)
+  // Agar kerak bo'lmasa, olib tashlash mumkin
 
   const isDisabled = useMemo(() => {
     if (loading || usersInitialLoading) return true;
@@ -256,7 +217,7 @@ const CreateRoomModal: React.FC<IProps> = ({ type, onClose, onSuccess }) => {
 
               <div>
                 <h2>
-                  {isGroup ? "Yangi guruh yaratish" : "Yangi chat boshlash fkopwek"}
+                  {isGroup ? "Yangi guruh yaratish" : "Yangi chat boshlash"}
                 </h2>
 
                 <p>
@@ -302,7 +263,7 @@ const CreateRoomModal: React.FC<IProps> = ({ type, onClose, onSuccess }) => {
             <div
               className={styless.users_list}
               ref={usersListRef}
-              onScroll={handleUsersScroll}
+              // onScroll endi olib tashlandi (pagination yo'q)
             >
               {usersInitialLoading ? (
                 Array.from({ length: 4 }).map((_, index) => (
@@ -328,7 +289,7 @@ const CreateRoomModal: React.FC<IProps> = ({ type, onClose, onSuccess }) => {
                   }
 
                   const isSelected = selectedUsers.includes(user.id);
-                  const displayName = user.full_name || user.username || "Noma'lum foydalanuvchi";
+                  const displayName = user.full_name || "Noma'lum foydalanuvchi";
                   const avatarLetter = displayName?.[0] ?? "?";
 
                   return (
@@ -340,12 +301,17 @@ const CreateRoomModal: React.FC<IProps> = ({ type, onClose, onSuccess }) => {
                       )}
                       onClick={() => handleToggleUser(user.id)}
                     >
-                      <div className={styless.avatar}>{avatarLetter}</div>
+                      <div className={styless.avatar}>
+                        {user.avatar ? (
+                          <img src={user.avatar} alt={displayName} />
+                        ) : (
+                          avatarLetter
+                        )}
+                      </div>
 
                       <div className={styless.user_info}>
                         <strong>{displayName}</strong>
-                        <span>Viloyat: {user.region ?? "-"}</span>
-                        <span>Tel: {user.phone ?? "-"}</span>
+                        {/* Region va phone ma'lumotlari endi yo'q, shuning uchun olib tashlandi */}
                       </div>
                     </button>
                   );

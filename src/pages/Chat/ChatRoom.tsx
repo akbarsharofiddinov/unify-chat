@@ -81,9 +81,7 @@ const ImageWithSkeleton: React.FC<ImageWithSkeletonProps> = ({
 
   return (
     <div className={styless.image_skeleton_root}>
-      {!loaded && !error && (
-        <div className={styless.image_skeleton_shimmer} />
-      )}
+      {!loaded && !error && <div className={styless.image_skeleton_shimmer} />}
       {error ? (
         <div className={styless.image_skeleton_error}>
           <span>🖼️</span>
@@ -121,13 +119,29 @@ const extractFileName = (message: MessageData) => {
 
   if (message.file_url) {
     try {
-      return (
+      const fileName =
         new URL(message.file_url, window.location.origin).pathname
           .split("/")
-          .pop() ?? "Fayl"
-      );
+          .pop() ?? "Fayl";
+
+      if (
+        fileName.endsWith(".webm") ||
+        fileName.endsWith(".mp3") ||
+        fileName.endsWith(".wav")
+      ) {
+        return "Ovozli xabar";
+      }
+      return fileName;
     } catch {
-      return message.file_url.split("/").pop() ?? "Fayl";
+      const fileName = message.file_url.split("/").pop() ?? "Fayl";
+      if (
+        fileName.endsWith(".webm") ||
+        fileName.endsWith(".mp3") ||
+        fileName.endsWith(".wav")
+      ) {
+        return "Ovozli xabar";
+      }
+      return fileName;
     }
   }
 
@@ -140,6 +154,118 @@ const calculateIsMy = (message: MessageData, selfUserId: number | null) => {
   }
 
   return Boolean(message.is_my);
+};
+
+// Voice message player component
+const VoiceMessagePlayer: React.FC<{
+  fileUrl: string;
+  message: MessageData;
+}> = ({ fileUrl, message }) => {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    const audio = new Audio(`https://chat.m-gaz.uz${fileUrl}`);
+    audioRef.current = audio;
+
+    audio.addEventListener("loadedmetadata", () => {
+      setDuration(audio.duration);
+    });
+
+    audio.addEventListener("timeupdate", () => {
+      setCurrentTime(audio.currentTime);
+    });
+
+    audio.addEventListener("ended", () => {
+      setIsPlaying(false);
+      setCurrentTime(0);
+    });
+
+    audio.addEventListener("play", () => {
+      setIsPlaying(true);
+    });
+
+    audio.addEventListener("pause", () => {
+      setIsPlaying(false);
+    });
+
+    return () => {
+      audio.pause();
+      audio.src = "";
+      audioRef.current = null;
+    };
+  }, [fileUrl]);
+
+  const togglePlay = () => {
+    if (!audioRef.current) return;
+
+    if (isPlaying) {
+      audioRef.current.pause();
+    } else {
+      audioRef.current.play();
+    }
+  };
+
+  const formatTime = (seconds: number) => {
+    if (isNaN(seconds)) return "00:00";
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  const handleProgressClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!audioRef.current || !duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percentage = x / rect.width;
+    const newTime = percentage * duration;
+    audioRef.current.currentTime = newTime;
+    setCurrentTime(newTime);
+  };
+
+  return (
+    <div className={styless.voice_message_wrapper}>
+      <div className={styless.voice_message_container}>
+        <button
+          className={styless.voice_play_btn}
+          onClick={togglePlay}
+          title={isPlaying ? "To'xtatish" : "Eshitish"}
+        >
+          {isPlaying ? (
+            <div className={styless.playing_animation}>
+              <span className={styless.bar} />
+              <span className={styless.bar} />
+              <span className={styless.bar} />
+            </div>
+          ) : (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          )}
+        </button>
+
+        <div className={styless.voice_progress_container}>
+          <div
+            className={styless.voice_progress_bar}
+            onClick={handleProgressClick}
+          >
+            <div
+              className={styless.voice_progress_filled}
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          <div className={styless.voice_time}>
+            <span>{formatTime(currentTime)}</span>
+            <span>{formatTime(duration)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 const ChatRoom: React.FC = () => {
@@ -160,10 +286,8 @@ const ChatRoom: React.FC = () => {
 
   // Upward infinite scroll pagination refs
   const chatMessagesRef = useRef<HTMLDivElement | null>(null);
-  // Cursor: the smallest message id currently loaded; used to fetch older messages
   const oldestMessageIdRef = useRef<number | null>(null);
   const isLoadingOlderMessagesRef = useRef<boolean>(false);
-  // Prevent fetching the same cursor twice in a row
   const lastFetchedOldestIdRef = useRef<number | null>(null);
   const scrollSnapshotRef = useRef<{
     scrollHeight: number;
@@ -235,7 +359,6 @@ const ChatRoom: React.FC = () => {
           const sigText = normalizeText(signature.text);
           const msgText = normalizeText(normalized.text);
 
-          // Allow match when normalized texts are equal or one contains the other (minor server-side changes)
           const textMatches =
             sigText === msgText ||
             sigText.startsWith(msgText) ||
@@ -245,7 +368,6 @@ const ChatRoom: React.FC = () => {
           const localTime = new Date(signature.created_at).getTime();
           const serverTime = new Date(normalized.created_at).getTime();
 
-          // Increase tolerance to 30s to account for clock differences / processing delays
           return Math.abs(localTime - serverTime) <= 30000;
         });
 
@@ -274,8 +396,6 @@ const ChatRoom: React.FC = () => {
         );
       });
 
-      // Update the room's last_message in the sidebar only for real
-      // (server-confirmed) messages — skip optimistic/pending ones (negative id).
       if (normalized.id > 0 && room_id) {
         dispatch(
           setRoomLastMessage({
@@ -322,12 +442,12 @@ const ChatRoom: React.FC = () => {
         msg.id !== messageId
           ? msg
           : {
-            ...msg,
-            text: "Xabar o'chirildi",
-            type: "text",
-            reply_to: null,
-            reads: msg.reads ?? [],
-          },
+              ...msg,
+              text: "Xabar o'chirildi",
+              type: "text",
+              reply_to: null,
+              reads: msg.reads ?? [],
+            },
       ),
     );
   }, []);
@@ -361,6 +481,21 @@ const ChatRoom: React.FC = () => {
       switch (event.type) {
         case "message":
           upsertMessage(event.message);
+
+          if (room_id) {
+            dispatch(
+              setRoomLastMessage({
+                roomId: Number(room_id),
+                last_message: {
+                  id: event.message.id,
+                  text: event.message.text,
+                  type: event.message.type,
+                  sender: event.message.sender,
+                  created_at: event.message.created_at,
+                },
+              }),
+            );
+          }
 
           if (!calculateIsMy(event.message, selfUserId)) {
             const id = event.message.id;
@@ -450,7 +585,6 @@ const ChatRoom: React.FC = () => {
     try {
       setLoadingMessages(true);
 
-      // Reset pagination states before loading new room messages
       oldestMessageIdRef.current = null;
       lastFetchedOldestIdRef.current = null;
       setHasMoreUp(false);
@@ -478,7 +612,6 @@ const ChatRoom: React.FC = () => {
           );
         setMessages(sorted);
 
-        // Store the oldest message id as the cursor for loading older pages
         const pagination = response.data.pagination;
         oldestMessageIdRef.current = pagination?.first_id ?? null;
         setHasMoreUp(Boolean(pagination?.has_more_up));
@@ -546,25 +679,17 @@ const ChatRoom: React.FC = () => {
     }
   }, [messages]);
 
-  // Load older messages using cursor-based pagination (before_id)
   const loadOlderMessages = useCallback(async () => {
     const beforeId = oldestMessageIdRef.current;
 
-    // No cursor means we haven't loaded initial messages yet or already at the top
     if (!beforeId) return;
-
-    // Already in-flight
     if (isLoadingOlderMessagesRef.current) return;
-
-    // Guard: same cursor was just fetched – don't repeat
     if (lastFetchedOldestIdRef.current === beforeId) return;
 
-    // Acquire loading lock
     isLoadingOlderMessagesRef.current = true;
     lastFetchedOldestIdRef.current = beforeId;
     setIsLoadingOlderMessages(true);
 
-    // Snapshot scroll position so we can restore it after prepending messages
     const container = chatMessagesRef.current;
     if (container) {
       scrollSnapshotRef.current = {
@@ -609,11 +734,9 @@ const ChatRoom: React.FC = () => {
             );
           });
 
-          // Update cursor to the oldest id in this new batch
           oldestMessageIdRef.current = pagination?.first_id ?? null;
           setHasMoreUp(Boolean(pagination?.has_more_up));
         } else {
-          // Empty result – reached the very beginning
           setHasMoreUp(false);
           oldestMessageIdRef.current = null;
         }
@@ -621,7 +744,6 @@ const ChatRoom: React.FC = () => {
     } catch (error) {
       console.error("Error loading older messages:", error);
       scrollSnapshotRef.current = null;
-      // Reset the guard so a retry is possible
       lastFetchedOldestIdRef.current = null;
     } finally {
       isLoadingOlderMessagesRef.current = false;
@@ -629,7 +751,6 @@ const ChatRoom: React.FC = () => {
     }
   }, [room_id, normalizeMessage]);
 
-  // Synchronously restore scroll position before browser repaints
   useLayoutEffect(() => {
     if (scrollSnapshotRef.current && chatMessagesRef.current) {
       const container = chatMessagesRef.current;
@@ -638,33 +759,20 @@ const ChatRoom: React.FC = () => {
       const newScrollHeight = container.scrollHeight;
       const heightDifference = newScrollHeight - scrollHeight;
 
-      // Adjust scrollTop relative to the height difference of prepended messages
       container.scrollTop = scrollTop + heightDifference;
-
-      console.log("Restored scroll position:", {
-        oldHeight: scrollHeight,
-        newHeight: newScrollHeight,
-        difference: heightDifference,
-        newScrollTop: container.scrollTop,
-      });
-
-      // Clean up snapshotted state
       scrollSnapshotRef.current = null;
     }
   }, [messages]);
 
-  // Monitor scroll position to trigger loading older messages when near the top
   const handleScroll = useCallback(() => {
     const container = chatMessagesRef.current;
     if (!container || !initialLoadCompleteRef.current) return;
 
-    // Debounce scroll handling
     if (scrollTimeoutRef.current) {
       clearTimeout(scrollTimeoutRef.current);
     }
 
     scrollTimeoutRef.current = setTimeout(() => {
-      // Trigger when within 80px of the top of the scroll container
       const isNearTop = container.scrollTop <= 80;
 
       if (
@@ -678,7 +786,6 @@ const ChatRoom: React.FC = () => {
     }, 150);
   }, [loadOlderMessages, hasMoreUp]);
 
-  // Clean up scroll timeout on unmount
   useEffect(() => {
     return () => {
       if (scrollTimeoutRef.current) {
@@ -687,7 +794,6 @@ const ChatRoom: React.FC = () => {
     };
   }, []);
 
-  // Debounce search input
   useEffect(() => {
     const handler = setTimeout(() => {
       setSearchQuery(searchInput);
@@ -695,7 +801,6 @@ const ChatRoom: React.FC = () => {
     return () => clearTimeout(handler);
   }, [searchInput]);
 
-  // Find messages matching search query
   const matchedMessages = useMemo(() => {
     if (!searchQuery.trim()) return [];
     const query = searchQuery.toLowerCase();
@@ -707,7 +812,6 @@ const ChatRoom: React.FC = () => {
     );
   }, [messages, searchQuery]);
 
-  // Default to last match (most recent) when matches change
   useEffect(() => {
     Promise.resolve().then(() => {
       if (matchedMessages.length > 0) {
@@ -718,7 +822,6 @@ const ChatRoom: React.FC = () => {
     });
   }, [matchedMessages]);
 
-  // Scroll to active match
   useEffect(() => {
     if (currentMatchIndex >= 0 && matchedMessages[currentMatchIndex]) {
       const activeId = matchedMessages[currentMatchIndex].id;
@@ -854,10 +957,20 @@ const ChatRoom: React.FC = () => {
 
     const tempId = -Date.now();
     const createdAt = new Date().toISOString();
+
+    let optimisticText = "";
+    if (selectedFile && message.trim()) {
+      optimisticText = message.trim();
+    } else if (selectedFile) {
+      optimisticText = selectedFile.name;
+    } else {
+      optimisticText = message.trim();
+    }
+
     const optimisticMessage: MessageData = {
       id: tempId,
       type: selectedFile ? "file" : "text",
-      text: selectedFile ? selectedFile.name : message,
+      text: optimisticText,
       is_my: true,
       sender: {
         id: selfUserId || 0,
@@ -873,8 +986,9 @@ const ChatRoom: React.FC = () => {
     };
 
     upsertMessage(optimisticMessage);
+
     pendingMessageSignaturesRef.current[tempId] = {
-      text: optimisticMessage.text.trim(),
+      text: optimisticText.trim(),
       created_at: createdAt,
     };
 
@@ -908,7 +1022,7 @@ const ChatRoom: React.FC = () => {
           throw new Error("Upload response did not return a file ID.");
         }
 
-        wasSent = socketSendFileId(fileId);
+        wasSent = socketSendFileId(fileId, message.trim() || undefined);
         setUploadProgress((prev) => (wasSent ? 100 : prev));
       } catch (error) {
         console.error("File upload failed", error);
@@ -946,6 +1060,92 @@ const ChatRoom: React.FC = () => {
     upsertMessage,
     isConnected,
   ]);
+
+  // Voice message direct send function
+  const handleSendVoiceMessage = useCallback(
+    async (voiceFile: File) => {
+      if (!voiceFile) return;
+
+      setSendError(null);
+
+      const tempId = -Date.now();
+      const createdAt = new Date().toISOString();
+
+      const optimisticMessage: MessageData = {
+        id: tempId,
+        type: "file",
+        text: voiceFile.name,
+        is_my: true,
+        sender: {
+          id: selfUserId || 0,
+          full_name: "You",
+          avatar: null,
+        },
+        reads: [],
+        is_edited: false,
+        file: voiceFile,
+        file_url: null,
+        reply_to: null,
+        created_at: createdAt,
+      };
+
+      upsertMessage(optimisticMessage);
+
+      pendingMessageSignaturesRef.current[tempId] = {
+        text: voiceFile.name.trim(),
+        created_at: createdAt,
+      };
+
+      setPendingMessageIds((prev) => new Set([...prev, tempId]));
+
+      setUploadProgress(0);
+
+      try {
+        if (!isConnected) {
+          throw new Error("Realtime connection is not available.");
+        }
+
+        const formData = new FormData();
+        formData.append("file", voiceFile);
+
+        const response = await axiosAPI.post("upload/", formData, {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+          onUploadProgress: (event) => {
+            if (event.total) {
+              setUploadProgress(Math.round((event.loaded / event.total) * 100));
+            }
+          },
+        });
+
+        const fileId = response.data?.id ?? response.data?.file_id ?? null;
+        if (fileId == null) {
+          throw new Error("Upload response did not return a file ID.");
+        }
+
+        const wasSent = socketSendFileId(fileId);
+        setUploadProgress((prev) => (wasSent ? 100 : prev));
+
+        if (!wasSent) {
+          throw new Error("Failed to send voice message via socket");
+        }
+
+        setUploadProgress(null);
+      } catch (error) {
+        console.error("Voice upload failed", error);
+        setSendError("Ovozli xabar yuborilmadi");
+        setPendingMessageIds((prev) => {
+          const updated = new Set(prev);
+          updated.delete(tempId);
+          return updated;
+        });
+        delete pendingMessageSignaturesRef.current[tempId];
+        setUploadProgress(null);
+      }
+    },
+    [selfUserId, isConnected, socketSendFileId, upsertMessage],
+  );
 
   const handleDelete = (messageId: number) => {
     if (!window.confirm("Xabarni o'chirmoqchimisiz?")) return;
@@ -1156,7 +1356,7 @@ const ChatRoom: React.FC = () => {
                       styless.message,
                       msg.is_my ? styless.message_me : styless.message_other,
                       msg.text === "Xabar o'chirildi" &&
-                      styless.message_deleted,
+                        styless.message_deleted,
                     )}
                   >
                     {!msg.is_my && (
@@ -1194,160 +1394,305 @@ const ChatRoom: React.FC = () => {
                       </div>
                     ) : (
                       <>
-                        {msg.type === "file" ? (() => {
-                          const fileName = extractFileName(msg);
-                          const isImage = isImageFile(fileName);
-                          const imageUrl = msg.file_url
-                            ? `https://chat.m-gaz.uz${msg.file_url}`
-                            : msg.file instanceof File && isImage
-                              ? URL.createObjectURL(msg.file)
-                              : null;
+                        {msg.type === "file" ? (
+                          (() => {
+                            const fileName = extractFileName(msg);
+                            const isImage = isImageFile(fileName);
+                            const isVoice =
+                              fileName === "Ovozli xabar" ||
+                              msg.file_url?.endsWith(".webm") ||
+                              msg.file_url?.endsWith(".mp3") ||
+                              msg.file_url?.endsWith(".wav");
 
-                          if (isImage && imageUrl) {
-                            return (
-                              <div className={styless.image_message_wrapper}>
-                                <div className={styless.image_message_container}>
-                                  <ImageWithSkeleton
-                                    src={imageUrl}
-                                    alt={fileName}
-                                    className={styless.image_message_preview}
-                                    onClick={() => {
-                                      if (msg.file_url) {
-                                        setFilePreview(msg.file_url);
-                                      }
-                                    }}
+                            const imageUrl = msg.file_url
+                              ? `https://chat.m-gaz.uz${msg.file_url}`
+                              : msg.file instanceof File && isImage
+                                ? URL.createObjectURL(msg.file)
+                                : null;
+
+                            const hasText =
+                              msg.text &&
+                              msg.text !== fileName &&
+                              msg.text.trim() !== "";
+
+                            // Voice message
+                            if (isVoice && msg.file_url) {
+                              return (
+                                <div
+                                  className={
+                                    styless.voice_message_container_wrapper
+                                  }
+                                >
+                                  <VoiceMessagePlayer
+                                    fileUrl={msg.file_url}
+                                    message={msg}
                                   />
-                                  {msg.file_url && (
-                                    <button
-                                      className={styless.image_download_btn}
-                                      title="Yuklab olish"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleDownload(msg.file_url!);
-                                      }}
-                                    >
-                                      <Download size={14} />
-                                    </button>
-                                  )}
-                                </div>
-                                <div className={styless.image_message_name}>
-                                  {fileName}
-                                </div>
-                              </div>
-                            );
-                          }
-
-                          return (
-                            <div className={styless.file_message_card}>
-                              <div className={styless.file_message_card_meta}>
-                                <div className={styless.file_message_card_info}>
-                                  <span
-                                    className={styless.file_message_card_icon}
-                                  >
-                                    <FileText size={18} />
-                                  </span>
-                                  <div>
-                                    <div
-                                      className={styless.file_message_card_name}
-                                    >
-                                      {fileName}
+                                  {hasText && (
+                                    <div className={styless.voice_message_text}>
+                                      {renderHighlightedText(
+                                        msg.text,
+                                        searchQuery,
+                                        matchedMessages[currentMatchIndex]
+                                          ?.id === msg.id,
+                                      )}
                                     </div>
-                                    {msg.file?.size ? (
-                                      <div
-                                        className={styless.file_message_card_size}
-                                      >
-                                        {formatFileSize(msg.file.size)}
-                                      </div>
-                                    ) : null}
+                                  )}
+                                  <div className={styless.message_footer}>
+                                    <span className={styless.message_time}>
+                                      {formatDateTime(msg.created_at)}
+                                    </span>
+                                    {msg.is_edited && (
+                                      <span className={styless.message_edited}>
+                                        (tahrirlandi)
+                                      </span>
+                                    )}
+                                    {msg.is_my && (
+                                      <MessageStatusIcon
+                                        status={getMessageStatus(
+                                          msg.id,
+                                          pendingMessageIds.has(msg.id),
+                                          msg.reads?.length ?? 0,
+                                        )}
+                                      />
+                                    )}
                                   </div>
                                 </div>
-                                <div
-                                  className={styless.file_message_card_actions}
-                                >
-                                  {msg.file_url ? (
-                                    <button
-                                      className={styless.file_message_card_button}
+                              );
+                            }
+
+                            // Image message
+                            if (isImage && imageUrl) {
+                              return (
+                                <div className={styless.image_message_wrapper}>
+                                  <div
+                                    className={styless.image_message_container}
+                                  >
+                                    <ImageWithSkeleton
+                                      src={imageUrl}
+                                      alt={fileName}
+                                      className={styless.image_message_preview}
                                       onClick={() => {
                                         if (msg.file_url) {
                                           setFilePreview(msg.file_url);
                                         }
                                       }}
+                                    />
+                                    {msg.file_url && (
+                                      <button
+                                        className={styless.image_download_btn}
+                                        title="Yuklab olish"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleDownload(msg.file_url!);
+                                        }}
+                                      >
+                                        <Download size={14} />
+                                      </button>
+                                    )}
+                                  </div>
+                                  <div className={styless.image_message_name}>
+                                    {fileName}
+                                  </div>
+                                  {hasText && (
+                                    <div className={styless.image_message_text}>
+                                      {renderHighlightedText(
+                                        msg.text,
+                                        searchQuery,
+                                        matchedMessages[currentMatchIndex]
+                                          ?.id === msg.id,
+                                      )}
+                                    </div>
+                                  )}
+                                  <div className={styless.message_footer}>
+                                    <span className={styless.message_time}>
+                                      {formatDateTime(msg.created_at)}
+                                    </span>
+                                    {msg.is_edited && (
+                                      <span className={styless.message_edited}>
+                                        (tahrirlandi)
+                                      </span>
+                                    )}
+                                    {msg.is_my && (
+                                      <MessageStatusIcon
+                                        status={getMessageStatus(
+                                          msg.id,
+                                          pendingMessageIds.has(msg.id),
+                                          msg.reads?.length ?? 0,
+                                        )}
+                                      />
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            }
+
+                            // Regular file message
+                            return (
+                              <div className={styless.file_message_card}>
+                                <div className={styless.file_message_card_meta}>
+                                  <div
+                                    className={styless.file_message_card_info}
+                                  >
+                                    <span
+                                      className={styless.file_message_card_icon}
                                     >
-                                      <Eye size={16} />
-                                    </button>
-                                  ) : null}
-                                  {msg.file_url ? (
-                                    <button
-                                      className={styless.file_message_card_button}
-                                      title="Yuklab olish"
-                                      onClick={() => {
-                                        handleDownload(msg.file_url!);
-                                      }}
-                                    >
-                                      <Download size={16} />
-                                    </button>
-                                  ) : null}
+                                      <FileText size={18} />
+                                    </span>
+                                    <div>
+                                      <div
+                                        className={
+                                          styless.file_message_card_name
+                                        }
+                                      >
+                                        {fileName}
+                                      </div>
+                                      {msg.file?.size ? (
+                                        <div
+                                          className={
+                                            styless.file_message_card_size
+                                          }
+                                        >
+                                          {formatFileSize(msg.file.size)}
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                  <div
+                                    className={
+                                      styless.file_message_card_actions
+                                    }
+                                  >
+                                    {msg.file_url ? (
+                                      <button
+                                        className={
+                                          styless.file_message_card_button
+                                        }
+                                        onClick={() => {
+                                          if (msg.file_url) {
+                                            setFilePreview(msg.file_url);
+                                          }
+                                        }}
+                                      >
+                                        <Eye size={16} />
+                                      </button>
+                                    ) : null}
+                                    {msg.file_url ? (
+                                      <button
+                                        className={
+                                          styless.file_message_card_button
+                                        }
+                                        title="Yuklab olish"
+                                        onClick={() => {
+                                          handleDownload(msg.file_url!);
+                                        }}
+                                      >
+                                        <Download size={16} />
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                </div>
+                                {hasText && (
+                                  <div className={styless.file_message_text}>
+                                    {renderHighlightedText(
+                                      msg.text,
+                                      searchQuery,
+                                      matchedMessages[currentMatchIndex]?.id ===
+                                        msg.id,
+                                    )}
+                                  </div>
+                                )}
+                                <div className={styless.message_footer}>
+                                  <span className={styless.message_time}>
+                                    {formatDateTime(msg.created_at)}
+                                  </span>
+                                  {msg.is_edited && (
+                                    <span className={styless.message_edited}>
+                                      (tahrirlandi)
+                                    </span>
+                                  )}
+                                  {msg.is_my && (
+                                    <MessageStatusIcon
+                                      status={getMessageStatus(
+                                        msg.id,
+                                        pendingMessageIds.has(msg.id),
+                                        msg.reads?.length ?? 0,
+                                      )}
+                                    />
+                                  )}
                                 </div>
                               </div>
-                            </div>
-                          );
-                        })() : (
-                          <p
-                            className={
-                              msg.text === "Xabar o'chirildi"
-                                ? styless.deleted_text
-                                : ""
-                            }
-                          >
-                            {renderHighlightedText(
-                              msg.text,
-                              searchQuery,
-                              matchedMessages[currentMatchIndex]?.id === msg.id,
-                            )}
-                          </p>
-                        )}
-                        <div className={styless.message_footer}>
-                          <span className={styless.message_time}>
-                            {formatDateTime(msg.created_at)}
-                          </span>
-                          {msg.is_edited && (
-                            <span className={styless.message_edited}>
-                              (tahrirlandi)
-                            </span>
-                          )}
-                          {msg.is_my && (
-                            <MessageStatusIcon
-                              status={getMessageStatus(
-                                msg.id,
-                                pendingMessageIds.has(msg.id),
-                                msg.reads?.length ?? 0,
+                            );
+                          })()
+                        ) : (
+                          <>
+                            <p className={styless.message_text}>
+                              {renderHighlightedText(
+                                msg.text,
+                                searchQuery,
+                                matchedMessages[currentMatchIndex]?.id ===
+                                  msg.id,
                               )}
-                            />
-                          )}
-                        </div>
+                            </p>
+                            <div className={styless.message_footer}>
+                              <span className={styless.message_time}>
+                                {formatDateTime(msg.created_at)}
+                              </span>
+                              {msg.is_edited && (
+                                <span className={styless.message_edited}>
+                                  (tahrirlandi)
+                                </span>
+                              )}
+                              {msg.is_my && (
+                                <MessageStatusIcon
+                                  status={getMessageStatus(
+                                    msg.id,
+                                    pendingMessageIds.has(msg.id),
+                                    msg.reads?.length ?? 0,
+                                  )}
+                                />
+                              )}
+                            </div>
+                          </>
+                        )}
                       </>
                     )}
 
                     {msg.is_my &&
                       editingMessageId !== msg.id &&
-                      msg.text !== "Xabar o'chirildi" && (
-                        <div className={styless.message_actions}>
-                          <button
-                            className={styless.message_action_button}
-                            type="button"
-                            onClick={() => handleEditStart(msg.id, msg.text)}
-                          >
-                            <Edit3 size={16} />
-                          </button>
-                          <button
-                            className={styless.message_action_button}
-                            type="button"
-                            onClick={() => handleDelete(msg.id)}
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      )}
+                      msg.text !== "Xabar o'chirildi" &&
+                      (() => {
+                        // Check if it's a voice message
+                        const fileName = extractFileName(msg);
+                        const isVoice =
+                          fileName === "Ovozli xabar" ||
+                          msg.file_url?.endsWith(".webm") ||
+                          msg.file_url?.endsWith(".mp3") ||
+                          msg.file_url?.endsWith(".wav");
+
+                        // Don't show edit button for voice messages
+                        return (
+                          <div className={styless.message_actions}>
+                            {!isVoice && (
+                              <button
+                                className={styless.message_action_button}
+                                type="button"
+                                onClick={() =>
+                                  handleEditStart(msg.id, msg.text)
+                                }
+                              >
+                                <Edit3 size={16} />
+                              </button>
+                            )}
+                            <button
+                              className={styless.message_action_button}
+                              type="button"
+                              onClick={() => handleDelete(msg.id)}
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        );
+                      })()}
                   </div>
                 </div>
               ))}
@@ -1367,6 +1712,7 @@ const ChatRoom: React.FC = () => {
               onBlur={handleInputBlur}
               onAttachmentSelected={handleAttachmentSelected}
               onAttachmentClear={handleAttachmentClear}
+              onSendVoiceMessage={handleSendVoiceMessage}
             />
           </>
         )}

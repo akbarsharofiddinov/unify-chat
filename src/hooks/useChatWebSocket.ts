@@ -435,22 +435,23 @@ export function useChatWebSocket(
       return;
     }
 
-    connectWebSocketRef.current?.(roomId);
+  connectWebSocketRef.current?.(roomId);
     return () => {
       cleanupSocket();
     };
   }, [roomId, cleanupSocket, setStatusSafe]);
 
   const sendFileId = useCallback(
-    (fileId: number, replyTo: number | null = null) =>
-      sendPayload({
-        type: "message",
-        msg_type: "file",
-        file_id: fileId,
-        reply_to: replyTo,
-      }),
-    [sendPayload],
-  );
+  (fileId: number, text?: string, replyTo: number | null = null) =>
+    sendPayload({
+      type: "message",
+      msg_type: "file",
+      text: text?.trim() || undefined,  // Agar matn bo'lsa qo'shadi
+      file_id: fileId,
+      reply_to: replyTo,
+    }),
+  [sendPayload],
+);
 
   return {
     status,
