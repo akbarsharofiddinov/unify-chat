@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Square, Trash2, Send, Volume2 } from "lucide-react";
+import { Square, Trash2, Send, Volume2, Mic, AlertCircle } from "lucide-react";
 import styless from "./VoiceRecorder.module.scss";
 
 interface VoiceRecorderProps {
@@ -15,29 +15,62 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   const [recordingTime, setRecordingTime] = useState(0);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
+  const [isPermissionChecking, setIsPermissionChecking] = useState(true);
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  useEffect(() => {
-    // Auto-start recording when component mounts
-    startRecording();
-    
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      if (audioUrl) URL.revokeObjectURL(audioUrl);
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
+  // Check and request microphone permission
+  const checkMicrophonePermission = async (): Promise<boolean> => {
+    try {
+      // First check if mediaDevices API is supported
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setPermissionError("Brauzeringiz mikrofonga ruxsat berishni qo'llab-quvvatlamaydi");
+        setIsPermissionChecking(false);
+        return false;
       }
-    };
-  }, []);
 
+      // Request microphone access
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      
+      // Close the stream immediately if we're just checking permission
+      // We'll open a new one when actually recording
+      stream.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+      
+      setPermissionError(null);
+      setIsPermissionChecking(false);
+      return true;
+    } catch (error: any) {
+      console.error("Microphone permission error:", error);
+      
+      if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+        setPermissionError("Mikrofonga ruxsat berilmagan. Iltimos, brauzer sozlamalaridan ruxsat bering.");
+      } else if (error.name === 'NotFoundError') {
+        setPermissionError("Mikrofon topilmadi. Iltimos, mikrofoningizni ulang.");
+      } else if (error.name === 'NotReadableError') {
+        setPermissionError("Mikrofonga ulanishda xatolik. Iltimos, boshqa dasturlar mikrofondan foydalanmayotganini tekshiring.");
+      } else {
+        setPermissionError("Mikrofonga ulanishda xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.");
+      }
+      
+      setIsPermissionChecking(false);
+      return false;
+    }
+  };
+
+  // Start actual recording
   const startRecording = async () => {
+    setPermissionError(null);
+    
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
+      
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       chunksRef.current = [];
@@ -56,22 +89,50 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
         
         if (streamRef.current) {
           streamRef.current.getTracks().forEach(track => track.stop());
+          streamRef.current = null;
         }
       };
 
-      mediaRecorder.start();
+      mediaRecorder.start(100); // Collect data in 100ms chunks
       setIsRecording(true);
       
       // Start timer
       timerRef.current = setInterval(() => {
         setRecordingTime(prev => prev + 1);
       }, 1000);
-    } catch (error) {
-      console.error("Error accessing microphone:", error);
-      alert("Mikrofonga ruxsat berilmagan");
-      onCancel();
+      
+    } catch (error: any) {
+      console.error("Start recording error:", error);
+      if (error.name === 'NotAllowedError') {
+        setPermissionError("Mikrofonga ruxsat berilmagan. Iltimos, brauzer sozlamalaridan ruxsat bering.");
+      } else {
+        setPermissionError("Yozishni boshlashda xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.");
+      }
     }
   };
+
+  // Auto-start recording when component mounts and permission is granted
+  useEffect(() => {
+    const initRecording = async () => {
+      const hasPermission = await checkMicrophonePermission();
+      if (hasPermission) {
+        await startRecording();
+      }
+    };
+    
+    initRecording();
+    
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (audioUrl) URL.revokeObjectURL(audioUrl);
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+      if (mediaRecorderRef.current && isRecording) {
+        mediaRecorderRef.current.stop();
+      }
+    };
+  }, []);
 
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
@@ -98,9 +159,7 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
     if (audioBlob) {
       const fileName = `voice_${Date.now()}.webm`;
       const file = new File([audioBlob], fileName, { type: "audio/webm" });
-      // Send the file immediately without waiting for attachment
       onRecordingComplete(file);
-      // Don't call cancelRecording here, let the parent handle cleanup
     }
   };
 
@@ -109,6 +168,50 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
     const secs = seconds % 60;
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
+
+  // Show permission error
+  if (permissionError) {
+    return (
+      <div className={styless.voice_recorder_error}>
+        <div className={styless.error_content}>
+          <AlertCircle size={24} className={styless.error_icon} />
+          <p className={styless.error_message}>{permissionError}</p>
+          <div className={styless.error_actions}>
+            <button 
+              className={styless.error_cancel_btn}
+              onClick={onCancel}
+            >
+              Bekor qilish
+            </button>
+            <button 
+              className={styless.error_retry_btn}
+              onClick={() => {
+                setPermissionError(null);
+                setIsPermissionChecking(true);
+                checkMicrophonePermission().then(hasPermission => {
+                  if (hasPermission) startRecording();
+                });
+              }}
+            >
+              Qayta urinish
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show checking permission state
+  if (isPermissionChecking) {
+    return (
+      <div className={styless.voice_recorder_checking}>
+        <div className={styless.checking_content}>
+          <Mic size={24} className={styless.checking_icon} />
+          <p>Mikrofonga ruxsat so'ralmoqda...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={styless.voice_recorder}>

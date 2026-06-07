@@ -149,3 +149,92 @@
     transform: scale(1.05);
   }
 }
+
+.voice_recorder_error {
+  padding: 20px;
+  background-color: #fef2f2;
+  border-radius: 12px;
+  border: 1px solid #fecaca;
+  margin-bottom: 8px;
+}
+
+.error_content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.error_icon {
+  color: #ef4444;
+}
+
+.error_message {
+  font-size: 14px;
+  color: #991b1b;
+  margin: 0;
+}
+
+.error_actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.error_cancel_btn, .error_retry_btn {
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.error_cancel_btn {
+  background-color: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  color: #374151;
+  
+  &:hover {
+    background-color: #e5e7eb;
+  }
+}
+
+.error_retry_btn {
+  background-color: #3b82f6;
+  border: none;
+  color: white;
+  
+  &:hover {
+    background-color: #2563eb;
+  }
+}
+
+.voice_recorder_checking {
+  padding: 20px;
+  background-color: #f9fafb;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  margin-bottom: 8px;
+}
+
+.checking_content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.checking_icon {
+  color: #3b82f6;
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
