@@ -67,20 +67,34 @@ interface MembarData {
   avatar: string | null;
 }
 
+interface FileItem {
+  id: number;
+  url: string;
+}
+
 interface MessageData {
   id: number;
-  type: messageType;
+  type: "text" | "file";
   text: string;
-  is_edited?: boolean;
-  file: File | null;
-  file_url?: string | null;
   is_my: boolean;
-  reply_to: number | null;
-  sender: MembarData;
-  reads: {
-    user: MembarData;
+  sender: {
+    id: number;
+    full_name: string;
+    avatar: string | null;
+  };
+  reads: Array<{
+    user: {
+      id: number;
+      full_name: string;
+      avatar: string | null;
+    };
     read_at: string;
-  }[];
+  }>;
+  is_edited: boolean;
+  files: FileItem[];
+  file?: File | null;
+  file_url?: string | null;
+  reply_to: any | null;
   created_at: string;
 }
 

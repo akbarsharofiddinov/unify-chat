@@ -1,0 +1,130 @@
+// components/FileList/FileList.module.scss
+.file_list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  min-width: 280px;
+  max-width: 360px;
+}
+
+.file_item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background-color: #ffffff;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+
+  &:hover {
+    background-color: #f8f9fa;
+    border-color: #dee2e6;
+    
+    .file_action_btn {
+      opacity: 1;
+    }
+  }
+}
+
+.file_icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background-color: #f1f3f5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #868e96;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.file_item:hover .file_icon {
+  background-color: #e9ecef;
+}
+
+.file_details {
+  flex: 1;
+  min-width: 0;
+}
+
+.file_name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #212529;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 2px;
+}
+
+.file_size {
+  font-size: 11px;
+  color: #adb5bd;
+  line-height: 1.3;
+}
+
+.file_actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.file_action_btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background-color: transparent;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: #adb5bd;
+  opacity: 0.6;
+
+  &:hover {
+    background-color: #e9ecef;
+    color: #495057;
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
+// Hoverda tugmalar to'liq ko'rinadi
+.file_item:hover .file_action_btn {
+  opacity: 0.8;
+}
+
+// Responsive
+@media (max-width: 640px) {
+  .file_list {
+    min-width: 240px;
+    max-width: 300px;
+  }
+
+  .file_item {
+    padding: 6px 10px;
+    gap: 10px;
+  }
+
+  .file_icon {
+    width: 28px;
+    height: 28px;
+  }
+
+  .file_name {
+    font-size: 12px;
+  }
+
+  .file_action_btn {
+    width: 26px;
+    height: 26px;
+  }
+}

@@ -41,6 +41,7 @@ import { ChatInfoModal } from "@/components";
 import ChatInput from "./ChatInput/ChatInput";
 import FilePreviewer from "@/components/FilePreviewer/FilePreviewer";
 import { toast } from "react-toastify";
+import { FileList } from "@/components/FileList/FileList";
 
 const IMAGE_EXTENSIONS = [
   "jpg",
@@ -325,6 +326,7 @@ const ChatRoom: React.FC = () => {
     (message: MessageData) => ({
       ...message,
       is_my: calculateIsMy(message, selfUserId),
+      files: message.files || [], // Ensure files array exists
       file: message.file ?? null,
       file_url: message.file_url ?? null,
       reply_to: message.reply_to ?? null,
@@ -1394,236 +1396,59 @@ const ChatRoom: React.FC = () => {
                       </div>
                     ) : (
                       <>
-                        {msg.type === "file" ? (
-                          (() => {
-                            const fileName = extractFileName(msg);
-                            const isImage = isImageFile(fileName);
-                            const isVoice =
-                              fileName === "Ovozli xabar" ||
-                              msg.file_url?.endsWith(".webm") ||
-                              msg.file_url?.endsWith(".mp3") ||
-                              msg.file_url?.endsWith(".wav");
+                        {msg.type === "file" ||
+                        (msg.files && msg.files.length > 0) ? (
+                          <div className={styless.message_content}>
+                            {/* Multiple files list - vertical layout */}
+                            {msg.files && msg.files.length > 0 && (
+                              <FileList
+                                files={msg.files.map((file) => ({
+                                  ...file,
+                                }))}
+                                onPreview={(fileUrl) => {
+                                  setFilePreview(fileUrl);
+                                }}
+                                onDownload={(fileUrl) => {
+                                  handleDownload(fileUrl);
+                                }}
+                                isMyMessage={msg.is_my}
+                              />
+                            )}
 
-                            const imageUrl = msg.file_url
-                              ? `https://chat.m-gaz.uz${msg.file_url}`
-                              : msg.file instanceof File && isImage
-                                ? URL.createObjectURL(msg.file)
-                                : null;
-
-                            const hasText =
-                              msg.text &&
-                              msg.text !== fileName &&
-                              msg.text.trim() !== "";
-
-                            // Voice message
-                            if (isVoice && msg.file_url) {
-                              return (
-                                <div
-                                  className={
-                                    styless.voice_message_container_wrapper
-                                  }
-                                >
-                                  <VoiceMessagePlayer
-                                    fileUrl={msg.file_url}
-                                    message={msg}
-                                  />
-                                  {hasText && (
-                                    <div className={styless.voice_message_text}>
-                                      {renderHighlightedText(
-                                        msg.text,
-                                        searchQuery,
-                                        matchedMessages[currentMatchIndex]
-                                          ?.id === msg.id,
-                                      )}
-                                    </div>
-                                  )}
-                                  <div className={styless.message_footer}>
-                                    <span className={styless.message_time}>
-                                      {formatDateTime(msg.created_at)}
-                                    </span>
-                                    {msg.is_edited && (
-                                      <span className={styless.message_edited}>
-                                        (tahrirlandi)
-                                      </span>
-                                    )}
-                                    {msg.is_my && (
-                                      <MessageStatusIcon
-                                        status={getMessageStatus(
-                                          msg.id,
-                                          pendingMessageIds.has(msg.id),
-                                          msg.reads?.length ?? 0,
-                                        )}
-                                      />
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            }
-
-                            // Image message
-                            if (isImage && imageUrl) {
-                              return (
-                                <div className={styless.image_message_wrapper}>
-                                  <div
-                                    className={styless.image_message_container}
-                                  >
-                                    <ImageWithSkeleton
-                                      src={imageUrl}
-                                      alt={fileName}
-                                      className={styless.image_message_preview}
-                                      onClick={() => {
-                                        if (msg.file_url) {
-                                          setFilePreview(msg.file_url);
-                                        }
-                                      }}
-                                    />
-                                    {msg.file_url && (
-                                      <button
-                                        className={styless.image_download_btn}
-                                        title="Yuklab olish"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleDownload(msg.file_url!);
-                                        }}
-                                      >
-                                        <Download size={14} />
-                                      </button>
-                                    )}
-                                  </div>
-                                  <div className={styless.image_message_name}>
-                                    {fileName}
-                                  </div>
-                                  {hasText && (
-                                    <div className={styless.image_message_text}>
-                                      {renderHighlightedText(
-                                        msg.text,
-                                        searchQuery,
-                                        matchedMessages[currentMatchIndex]
-                                          ?.id === msg.id,
-                                      )}
-                                    </div>
-                                  )}
-                                  <div className={styless.message_footer}>
-                                    <span className={styless.message_time}>
-                                      {formatDateTime(msg.created_at)}
-                                    </span>
-                                    {msg.is_edited && (
-                                      <span className={styless.message_edited}>
-                                        (tahrirlandi)
-                                      </span>
-                                    )}
-                                    {msg.is_my && (
-                                      <MessageStatusIcon
-                                        status={getMessageStatus(
-                                          msg.id,
-                                          pendingMessageIds.has(msg.id),
-                                          msg.reads?.length ?? 0,
-                                        )}
-                                      />
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            }
-
-                            // Regular file message
-                            return (
-                              <div className={styless.file_message_card}>
-                                <div className={styless.file_message_card_meta}>
-                                  <div
-                                    className={styless.file_message_card_info}
-                                  >
-                                    <span
-                                      className={styless.file_message_card_icon}
-                                    >
-                                      <FileText size={18} />
-                                    </span>
-                                    <div>
-                                      <div
-                                        className={
-                                          styless.file_message_card_name
-                                        }
-                                      >
-                                        {fileName}
-                                      </div>
-                                      {msg.file?.size ? (
-                                        <div
-                                          className={
-                                            styless.file_message_card_size
-                                          }
-                                        >
-                                          {formatFileSize(msg.file.size)}
-                                        </div>
-                                      ) : null}
-                                    </div>
-                                  </div>
-                                  <div
-                                    className={
-                                      styless.file_message_card_actions
-                                    }
-                                  >
-                                    {msg.file_url ? (
-                                      <button
-                                        className={
-                                          styless.file_message_card_button
-                                        }
-                                        onClick={() => {
-                                          if (msg.file_url) {
-                                            setFilePreview(msg.file_url);
-                                          }
-                                        }}
-                                      >
-                                        <Eye size={16} />
-                                      </button>
-                                    ) : null}
-                                    {msg.file_url ? (
-                                      <button
-                                        className={
-                                          styless.file_message_card_button
-                                        }
-                                        title="Yuklab olish"
-                                        onClick={() => {
-                                          handleDownload(msg.file_url!);
-                                        }}
-                                      >
-                                        <Download size={16} />
-                                      </button>
-                                    ) : null}
-                                  </div>
-                                </div>
-                                {hasText && (
-                                  <div className={styless.file_message_text}>
-                                    {renderHighlightedText(
-                                      msg.text,
-                                      searchQuery,
-                                      matchedMessages[currentMatchIndex]?.id ===
-                                        msg.id,
-                                    )}
-                                  </div>
+                            {/* Text content if exists */}
+                            {msg.text && msg.text.trim() !== "" && (
+                              <div className={styless.message_text_content}>
+                                {renderHighlightedText(
+                                  msg.text,
+                                  searchQuery,
+                                  matchedMessages[currentMatchIndex]?.id ===
+                                    msg.id,
                                 )}
-                                <div className={styless.message_footer}>
-                                  <span className={styless.message_time}>
-                                    {formatDateTime(msg.created_at)}
-                                  </span>
-                                  {msg.is_edited && (
-                                    <span className={styless.message_edited}>
-                                      (tahrirlandi)
-                                    </span>
-                                  )}
-                                  {msg.is_my && (
-                                    <MessageStatusIcon
-                                      status={getMessageStatus(
-                                        msg.id,
-                                        pendingMessageIds.has(msg.id),
-                                        msg.reads?.length ?? 0,
-                                      )}
-                                    />
-                                  )}
-                                </div>
                               </div>
-                            );
-                          })()
+                            )}
+
+                            <div className={styless.message_footer}>
+                              <span className={styless.message_time}>
+                                {formatDateTime(msg.created_at)}
+                              </span>
+                              {msg.is_edited && (
+                                <span className={styless.message_edited}>
+                                  (tahrirlandi)
+                                </span>
+                              )}
+                              {msg.is_my && (
+                                <MessageStatusIcon
+                                  status={getMessageStatus(
+                                    msg.id,
+                                    pendingMessageIds.has(msg.id),
+                                    msg.reads?.length ?? 0,
+                                  )}
+                                />
+                              )}
+                            </div>
+                          </div>
                         ) : (
+                          // Text only message (same as before)
                           <>
                             <p className={styless.message_text}>
                               {renderHighlightedText(
