@@ -1,7 +1,7 @@
-// FilePreviewer.tsx (optimallashtirilgan versiya)
+// FilePreviewer.tsx (oddiy iframe bilan)
 import React, { useEffect, useState, useMemo, useRef } from "react";
 import * as XLSX from "xlsx";
-import { X } from "lucide-react";
+import { X, Download, Eye } from "lucide-react";
 
 type Props = {
   file?: File;
@@ -22,6 +22,7 @@ export default function FilePreviewer({
 }: Props) {
   const [url, setUrl] = useState<string>();
   const [officeViewerUrl, setOfficeViewerUrl] = useState<string>("");
+  const [iframeError, setIframeError] = useState(false);
 
   const getFileNameFromUrl = (inputUrl: string) => {
     try {
@@ -52,19 +53,15 @@ export default function FilePreviewer({
 
   const isPdfFile = useMemo(() => ext === "pdf", [ext]);
   const isImageFile = useMemo(
-    () => ["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext),
+    () =>
+      ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico"].includes(ext),
     [ext],
   );
   const isTextFile = useMemo(
-    () => ["txt", "csv", "json", "md", "log", "html", "htm"].includes(ext),
+    () =>
+      ["txt", "csv", "json", "md", "log", "html", "htm", "xml"].includes(ext),
     [ext],
   );
-
-  // Google Docs Viewer URL yaratish
-  const getGoogleDocsViewerUrl = (fileUrl: string) => {
-    const encodedUrl = encodeURIComponent(fileUrl);
-    return `https://docs.google.com/gview?url=${encodedUrl}&embedded=true`;
-  };
 
   // Microsoft Office Online Viewer URL
   const getMicrosoftOfficeViewerUrl = (fileUrl: string) => {
@@ -86,11 +83,12 @@ export default function FilePreviewer({
 
   // Blob URL yaratish
   useEffect(() => {
+    setIframeError(false);
+
     if (file) {
       const objectUrl = URL.createObjectURL(file);
       setUrl(objectUrl);
 
-      // Office fayllar uchun viewer URL
       if (isOfficeFile) {
         setOfficeViewerUrl(getMicrosoftOfficeViewerUrl(objectUrl));
       }
@@ -99,18 +97,25 @@ export default function FilePreviewer({
     }
 
     if (file_url) {
-      setUrl(file_url);
+      // To'liq URL yaratish
+      const fullUrl = file_url.startsWith("http")
+        ? file_url
+        : `https://chat.m-gaz.uz${file_url}`;
+      setUrl(fullUrl);
+
       if (isOfficeFile) {
-        // URL ni CORS muammosini hal qilish uchun proxy kerak bo'lishi mumkin
-        setOfficeViewerUrl(getMicrosoftOfficeViewerUrl(file_url));
+        setOfficeViewerUrl(getMicrosoftOfficeViewerUrl(fullUrl));
       }
     }
 
     return undefined;
   }, [file, file_url, isOfficeFile]);
 
-  // PDF preview (iframe yoki react-pdf)
+  // PDF preview - Google Docs Viewer
   if (isPdfFile && url) {
+    // Google Docs Viewer URL
+    const googleViewerUrl = `https://docs.google.com/gview?url=${encodeURIComponent(url)}&embedded=true`;
+
     return (
       <div
         className={className}
@@ -126,7 +131,7 @@ export default function FilePreviewer({
           style={{
             display: "flex",
             alignItems: "center",
-            justifyContent: "flex-end",
+            justifyContent: "space-between",
             gap: 8,
             padding: "8px 12px",
             borderBottom: "1px solid #e5e7eb",
@@ -134,30 +139,58 @@ export default function FilePreviewer({
             flexShrink: 0,
           }}
         >
-          {onClose && (
+          <div style={{ flex: 1 }}>
+            <span style={{ fontSize: 14, fontWeight: 500, color: "#374151" }}>
+              {file?.name || getFileNameFromUrl(file_url || "")}
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleDownload}
               style={{
                 padding: "6px 12px",
-                border: "1px solid #e5e7eb",
+                border: "1px solid #3b82f6",
                 borderRadius: 6,
-                background: "white",
-                color: "#374151",
+                background: "#3b82f6",
+                color: "white",
                 cursor: "pointer",
                 display: "flex",
                 alignItems: "center",
                 gap: 6,
               }}
             >
-              <X size={16} />
+              <Download size={16} />
+              Yuklab olish
             </button>
-          )}
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                style={{
+                  padding: "6px 12px",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 6,
+                  background: "white",
+                  color: "#374151",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
         </div>
+
+        {/* Google Docs Viewer iframe */}
         <iframe
-          title={file?.name || file_url || "PDF"}
-          src={url}
+          src={googleViewerUrl}
+          title="PDF Viewer"
           style={{ flex: 1, border: 0, width: "100%", height: "100%" }}
+          sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-downloads"
         />
       </div>
     );
@@ -190,7 +223,11 @@ export default function FilePreviewer({
             flexShrink: 0,
           }}
         >
-          <div style={{ flex: 1 }} />
+          <div style={{ flex: 1 }}>
+            <span style={{ fontSize: 14, fontWeight: 500, color: "#374151" }}>
+              {file?.name || getFileNameFromUrl(file_url || "")}
+            </span>
+          </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {(download_file_url || url) && (
               <button
@@ -203,11 +240,14 @@ export default function FilePreviewer({
                   background: "#3b82f6",
                   color: "white",
                   cursor: "pointer",
-                  fontWeight: 500,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
                   fontSize: 14,
                 }}
               >
-                📥 Yuklab olish
+                <Download size={16} />
+                Yuklab olish
               </button>
             )}
             {onClose && (
@@ -232,7 +272,7 @@ export default function FilePreviewer({
           </div>
         </div>
 
-        {/* Viewer */}
+        {/* Office Viewer iframe */}
         <iframe
           src={officeViewerUrl}
           title={file?.name || file_url || "Office document"}
@@ -261,11 +301,12 @@ export default function FilePreviewer({
           ...style,
         }}
       >
+        {/* Toolbar */}
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            justifyContent: "flex-end",
+            justifyContent: "space-between",
             gap: 8,
             padding: "8px 12px",
             borderBottom: "1px solid #e5e7eb",
@@ -273,45 +314,82 @@ export default function FilePreviewer({
             flexShrink: 0,
           }}
         >
-          {onClose && (
+          <div style={{ flex: 1 }}>
+            <span style={{ fontSize: 14, fontWeight: 500, color: "#374151" }}>
+              {file?.name || getFileNameFromUrl(file_url || "")}
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleDownload}
               style={{
                 padding: "6px 12px",
-                border: "1px solid #e5e7eb",
+                border: "1px solid #3b82f6",
                 borderRadius: 6,
-                background: "white",
-                color: "#374151",
+                background: "#3b82f6",
+                color: "white",
                 cursor: "pointer",
                 display: "flex",
                 alignItems: "center",
                 gap: 6,
               }}
             >
-              <X size={16} />
+              <Download size={16} />
+              Yuklab olish
             </button>
-          )}
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                style={{
+                  padding: "6px 12px",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 6,
+                  background: "white",
+                  color: "#374151",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
         </div>
-        <div style={{ flex: 1, overflow: "auto", display: "flex", alignItems: "center", justifyContent: "center", background: "#f3f4f6" }}>
+
+        {/* Image viewer */}
+        <div
+          style={{
+            flex: 1,
+            overflow: "auto",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "#f3f4f6",
+          }}
+        >
           <img
             src={url}
             alt={file?.name || file_url || "image"}
-            style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
+            style={{
+              maxWidth: "100%",
+              maxHeight: "100%",
+              objectFit: "contain",
+            }}
           />
         </div>
       </div>
     );
   }
 
-  // Matnli fayllar (fallback)
-  const TextPreview = () => {
+  // Matnli fayllar
+  if (isTextFile && file) {
     const [content, setContent] = useState<string>("");
-    const textRef = useRef<HTMLPreElement>(null);
 
     useEffect(() => {
-      if (!file) return;
-
       const reader = new FileReader();
       reader.onload = () => {
         setContent(String(reader.result ?? ""));
@@ -320,34 +398,96 @@ export default function FilePreviewer({
     }, [file]);
 
     return (
-      <pre
-        ref={textRef}
+      <div
         className={className}
         style={{
           width: "100%",
           height: "100%",
-          overflow: "auto",
-          padding: 16,
-          margin: 0,
-          background: "white",
-          fontFamily: "monospace",
-          fontSize: 14,
+          display: "flex",
+          flexDirection: "column",
           ...style,
         }}
       >
-        {content}
-      </pre>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+            padding: "8px 12px",
+            borderBottom: "1px solid #e5e7eb",
+            background: "white",
+            flexShrink: 0,
+          }}
+        >
+          <div style={{ flex: 1 }}>
+            <span style={{ fontSize: 14, fontWeight: 500, color: "#374151" }}>
+              {file.name}
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              type="button"
+              onClick={handleDownload}
+              style={{
+                padding: "6px 12px",
+                border: "1px solid #3b82f6",
+                borderRadius: 6,
+                background: "#3b82f6",
+                color: "white",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <Download size={16} />
+              Yuklab olish
+            </button>
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                style={{
+                  padding: "6px 12px",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 6,
+                  background: "white",
+                  color: "#374151",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
+        </div>
+        <pre
+          style={{
+            flex: 1,
+            overflow: "auto",
+            padding: 16,
+            margin: 0,
+            background: "white",
+            fontFamily: "monospace",
+            fontSize: 14,
+          }}
+        >
+          {content}
+        </pre>
+      </div>
     );
-  };
+  }
 
-  // Excel fayllar uchun alternativ (local preview)
-  const ExcelPreview = () => {
+  // Excel fayllar
+  if (["xlsx", "xls"].includes(ext) && file) {
     const [html, setHtml] = useState<string>("");
     const xlsRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-      if (!file || !xlsRef.current) return;
-
       const reader = new FileReader();
       reader.onload = () => {
         try {
@@ -373,8 +513,6 @@ export default function FilePreviewer({
     useEffect(() => {
       if (xlsRef.current && html) {
         xlsRef.current.innerHTML = html;
-
-        // Styling qo'shish
         xlsRef.current.querySelectorAll("td,th").forEach((el) => {
           (el as HTMLElement).style.border = "1px solid #e5e7eb";
           (el as HTMLElement).style.padding = "8px 12px";
@@ -383,34 +521,6 @@ export default function FilePreviewer({
       }
     }, [html]);
 
-    return (
-      <div
-        ref={xlsRef}
-        className={className}
-        style={{
-          width: "100%",
-          height: "100%",
-          overflow: "auto",
-          background: "white",
-          padding: 16,
-          ...style,
-        }}
-      />
-    );
-  };
-
-  // Text fayllar
-  if (isTextFile && !isOfficeFile) {
-    return <TextPreview />;
-  }
-
-  // Excel fayllar (local fallback)
-  if (["xlsx", "xls"].includes(ext) && !officeViewerUrl) {
-    return <ExcelPreview />;
-  }
-
-  // Fayl topilmadi
-  if (!file && !url) {
     return (
       <div
         className={className}
@@ -426,7 +536,7 @@ export default function FilePreviewer({
           style={{
             display: "flex",
             alignItems: "center",
-            justifyContent: "flex-end",
+            justifyContent: "space-between",
             gap: 8,
             padding: "8px 12px",
             borderBottom: "1px solid #e5e7eb",
@@ -434,6 +544,131 @@ export default function FilePreviewer({
             flexShrink: 0,
           }}
         >
+          <div style={{ flex: 1 }}>
+            <span style={{ fontSize: 14, fontWeight: 500, color: "#374151" }}>
+              {file.name}
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              type="button"
+              onClick={handleDownload}
+              style={{
+                padding: "6px 12px",
+                border: "1px solid #3b82f6",
+                borderRadius: 6,
+                background: "#3b82f6",
+                color: "white",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <Download size={16} />
+              Yuklab olish
+            </button>
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                style={{
+                  padding: "6px 12px",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 6,
+                  background: "white",
+                  color: "#374151",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
+        </div>
+        <div
+          ref={xlsRef}
+          style={{
+            flex: 1,
+            overflow: "auto",
+            padding: 16,
+            background: "white",
+          }}
+        />
+      </div>
+    );
+  }
+
+  // Fayl topilmadi
+  if (!file && !url) {
+    return (
+      <div
+        className={className}
+        style={{
+          width: "100%",
+          height: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          ...style,
+        }}
+      >
+        <div style={{ textAlign: "center" }}>
+          <p>Fayl topilmadi</p>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                marginTop: 16,
+                padding: "6px 12px",
+                border: "1px solid #e5e7eb",
+                borderRadius: 6,
+                background: "white",
+                cursor: "pointer",
+              }}
+            >
+              Yopish
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Default - yuklab olish taklifi
+  return (
+    <div
+      className={className}
+      style={{
+        width: "100%",
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        ...style,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+          padding: "8px 12px",
+          borderBottom: "1px solid #e5e7eb",
+          background: "white",
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ flex: 1 }}>
+          <span style={{ fontSize: 14, fontWeight: 500, color: "#374151" }}>
+            {file?.name || getFileNameFromUrl(file_url || "")}
+          </span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {onClose && (
             <button
               type="button"
@@ -454,69 +689,17 @@ export default function FilePreviewer({
             </button>
           )}
         </div>
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-          <p>Fayl topilmadi.</p>
-        </div>
       </div>
-    );
-  }
-
-  // Default - download taklifi
-  return (
-    <div
-      className={className}
-      style={{
-        width: "100%",
-        height: "100%",
-        display: "flex",
-        flexDirection: "column",
-        ...style,
-      }}
-    >
       <div
         style={{
+          flex: 1,
           display: "flex",
           alignItems: "center",
-          justifyContent: "flex-end",
-          gap: 8,
-          padding: "8px 12px",
-          borderBottom: "1px solid #e5e7eb",
-          background: "white",
-          flexShrink: 0,
+          justifyContent: "center",
+          padding: 24,
         }}
       >
-        {onClose && (
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              padding: "6px 12px",
-              border: "1px solid #e5e7eb",
-              borderRadius: 6,
-              background: "white",
-              color: "#374151",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-            }}
-          >
-            <X size={16} />
-          </button>
-        )}
-      </div>
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-        <div
-          style={{
-            background: "#f9fafb",
-            border: "1px solid #e5e7eb",
-            borderRadius: 8,
-            padding: 24,
-            maxWidth: 400,
-            margin: "0 auto",
-            textAlign: "center",
-          }}
-        >
+        <div style={{ textAlign: "center" }}>
           <p style={{ color: "#374151", marginBottom: 8, fontWeight: 500 }}>
             Preview mavjud emas
           </p>
@@ -524,22 +707,23 @@ export default function FilePreviewer({
             Fayl turi: {ext?.toUpperCase() || "Noma'lum"}
           </p>
           {url && (
-            <a
-              href={url}
-              download
+            <button
+              onClick={handleDownload}
               style={{
-                display: "inline-block",
                 padding: "8px 16px",
                 background: "#3b82f6",
                 color: "white",
+                border: "none",
                 borderRadius: 6,
-                textDecoration: "none",
-                fontSize: 14,
-                fontWeight: 500,
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
               }}
             >
-              Faylni yuklab olish
-            </a>
+              <Download size={16} />
+              Yuklab olish
+            </button>
           )}
         </div>
       </div>

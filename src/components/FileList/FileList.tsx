@@ -29,8 +29,12 @@ interface FileListProps {
 
 const getFileIcon = (fileName: string) => {
   const ext = fileName.split(".").pop()?.toLowerCase() || "";
-  
-  if (["jpg", "jpeg", "png", "gif", "webp", "svg", "avif", "bmp", "ico"].includes(ext)) {
+
+  if (
+    ["jpg", "jpeg", "png", "gif", "webp", "svg", "avif", "bmp", "ico"].includes(
+      ext,
+    )
+  ) {
     return Image;
   }
   if (["mp3", "wav", "ogg", "webm", "m4a", "flac"].includes(ext)) {
@@ -39,7 +43,20 @@ const getFileIcon = (fileName: string) => {
   if (["zip", "rar", "7z", "tar", "gz", "bz2"].includes(ext)) {
     return Archive;
   }
-  if (["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "rtf"].includes(ext)) {
+  if (
+    [
+      "pdf",
+      "doc",
+      "docx",
+      "xls",
+      "xlsx",
+      "ppt",
+      "pptx",
+      "txt",
+      "md",
+      "rtf",
+    ].includes(ext)
+  ) {
     return FileText;
   }
   return File;
@@ -61,7 +78,7 @@ const extractFileName = (url: string): string => {
     const decodedUrl = decodeURIComponent(url);
     const fileName = decodedUrl.split("/").pop() || "Fayl";
     // Remove timestamp or random strings if needed
-    return fileName.replace(/_[A-Za-z0-9]{7,}$/, '');
+    return fileName.replace(/_[A-Za-z0-9]{7,}$/, "");
   } catch {
     return url.split("/").pop() || "Fayl";
   }
@@ -86,16 +103,13 @@ export const FileList: React.FC<FileListProps> = ({
         const fileName = file.name || extractFileName(file.url);
         const truncatedName = truncateFileName(fileName);
         const FileIcon = getFileIcon(fileName);
-        
+
         return (
-          <div 
-            key={file.id} 
-            className={styles.file_item}
-          >
+          <div key={file.id} className={styles.file_item}>
             <div className={styles.file_icon}>
               <FileIcon size={18} />
             </div>
-            
+
             <div className={styles.file_details}>
               <div className={styles.file_name} title={fileName}>
                 {truncatedName}
@@ -106,11 +120,17 @@ export const FileList: React.FC<FileListProps> = ({
                 </div>
               )}
             </div>
-            
+
             <div className={styles.file_actions}>
               <button
                 className={styles.file_action_btn}
-                onClick={() => onPreview(file.url, fileName)}
+                onClick={() => {
+                  if(file.url.startsWith("/media/")) {
+                  onPreview(file.url, fileName);
+                  } else {
+                    onPreview(`/media/${file.url}`, fileName);
+                  }
+                }}
                 title="Ko'rish"
               >
                 <Eye size={16} />

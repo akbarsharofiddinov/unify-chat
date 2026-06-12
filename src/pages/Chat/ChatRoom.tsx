@@ -43,20 +43,17 @@ import FilePreviewer from "@/components/FilePreviewer/FilePreviewer";
 import { toast } from "react-toastify";
 import { FileList } from "@/components/FileList/FileList";
 
+// Attachment file interface for ChatInput
+interface AttachmentFile {
+  id: string;
+  file: File;
+  previewUrl: string | null;
+  uploadProgress: number;
+  error?: string;
+}
+
 const IMAGE_EXTENSIONS = [
-  "jpg",
-  "jpeg",
-  "png",
-  "gif",
-  "webp",
-  "bmp",
-  "svg",
-  "avif",
-  "ico",
-  "tiff",
-  "tif",
-  "heic",
-  "heif",
+  "jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "avif", "ico", "tiff", "tif", "heic", "heif",
 ];
 
 const isImageFile = (fileName: string): boolean => {
@@ -113,11 +110,24 @@ const formatFileSize = (size: number) => {
   return `${size} B`;
 };
 
+const extractFileNameFromUrl = (url: string): string => {
+  if (!url) return "Fayl";
+  try {
+    const decodedUrl = decodeURIComponent(url);
+    const fileName = decodedUrl.split("/").pop() || "Fayl";
+    return fileName;
+  } catch {
+    return url.split("/").pop() || "Fayl";
+  }
+};
+
 const extractFileName = (message: MessageData) => {
+  if (message.files && message.files.length > 0) {
+    return message.files[0].name || extractFileNameFromUrl(message.files[0].url);
+  }
   if (message.file?.name) {
     return message.file.name;
   }
-
   if (message.file_url) {
     try {
       const fileName =
@@ -153,7 +163,6 @@ const calculateIsMy = (message: MessageData, selfUserId: number | null) => {
   if (message.sender?.id != null && selfUserId != null) {
     return String(message.sender.id) === String(selfUserId);
   }
-
   return Boolean(message.is_my);
 };
 
@@ -201,7 +210,6 @@ const VoiceMessagePlayer: React.FC<{
 
   const togglePlay = () => {
     if (!audioRef.current) return;
-
     if (isPlaying) {
       audioRef.current.pause();
     } else {
@@ -280,6 +288,11 @@ const ChatRoom: React.FC = () => {
   const [currentMatchIndex, setCurrentMatchIndex] = useState<number>(-1);
   const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
   const [filePreview, setFilePreview] = useState<string>("");
+  const [previewFileUrl, setPreviewFileUrl] = useState<string>("");
+
+  // Multiple file upload states
+  const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
 
   // Upward infinite scroll pagination states
   const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
@@ -301,13 +314,9 @@ const ChatRoom: React.FC = () => {
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
   const [editingText, setEditingText] = useState("");
   const [sendError, setSendError] = useState<string | null>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
-  const [pendingMessageIds, setPendingMessageIds] = useState<Set<number>>(
-    new Set(),
-  );
+  const [pendingMessageIds, setPendingMessageIds] = useState<Set<number>>(new Set());
   const pendingMessageSignaturesRef = useRef<
-    Record<number, { text: string; created_at: string }>
+    Record<number, { text: string; created_at: string; fileIds?: number[] }>
   >({});
 
   const { room_id } = useParams();
@@ -326,7 +335,11 @@ const ChatRoom: React.FC = () => {
     (message: MessageData) => ({
       ...message,
       is_my: calculateIsMy(message, selfUserId),
-      files: message.files || [], // Ensure files array exists
+      files: (message.files || []).map((f: any) => ({
+        ...f,
+        // Agar URL bo'sh bo'lmasa va relative bo'lsa, saqlaymiz, to'ldirishni faqat previewda qilamiz
+        url: f.url || "",
+      })),
       file: message.file ?? null,
       file_url: message.file_url ?? null,
       reply_to: message.reply_to ?? null,
@@ -337,94 +350,96 @@ const ChatRoom: React.FC = () => {
   );
 
   const upsertMessage = useCallback(
-    (incoming: MessageData) => {
-      const normalized = normalizeMessage(incoming);
+  (incoming: MessageData) => {
+    const normalized = normalizeMessage(incoming);
 
-      setMessages((prev) => {
-        const existingIndex = prev.findIndex(
-          (item) => item.id === normalized.id,
-        );
-        if (existingIndex >= 0) {
-          const updated = [...prev];
-          updated[existingIndex] = { ...updated[existingIndex], ...normalized };
+    setMessages((prev) => {
+      const existingIndex = prev.findIndex(
+        (item) => item.id === normalized.id,
+      );
+      if (existingIndex >= 0) {
+        const updated = [...prev];
+        updated[existingIndex] = { ...updated[existingIndex], ...normalized };
+        return updated;
+      }
+
+      const normalizeText = (t?: string) =>
+        (t ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+
+      // Pending messageni topish - text va vaqt bo'yicha
+      const pendingIndex = prev.findIndex((item) => {
+        if (!item.is_my) return false;
+        const signature = pendingMessageSignaturesRef.current[item.id];
+        if (!signature) return false;
+
+        const sigText = normalizeText(signature.text);
+        const msgText = normalizeText(normalized.text);
+
+        const textMatches =
+          sigText === msgText ||
+          sigText.startsWith(msgText) ||
+          msgText.startsWith(sigText);
+        if (!textMatches) return false;
+
+        const localTime = new Date(signature.created_at).getTime();
+        const serverTime = new Date(normalized.created_at).getTime();
+
+        return Math.abs(localTime - serverTime) <= 30000;
+      });
+
+      if (pendingIndex >= 0) {
+        const pendingId = prev[pendingIndex].id;
+        
+        // Remove old pending ID
+        setPendingMessageIds((pending) => {
+          const updated = new Set(pending);
+          updated.delete(pendingId);
           return updated;
-        }
-
-        const normalizeText = (t?: string) =>
-          (t ?? "").trim().replace(/\s+/g, " ").toLowerCase();
-
-        const pendingIndex = prev.findIndex((item) => {
-          if (!item.is_my) return false;
-          const signature = pendingMessageSignaturesRef.current[item.id];
-          if (!signature) return false;
-
-          const sigText = normalizeText(signature.text);
-          const msgText = normalizeText(normalized.text);
-
-          const textMatches =
-            sigText === msgText ||
-            sigText.startsWith(msgText) ||
-            msgText.startsWith(sigText);
-          if (!textMatches) return false;
-
-          const localTime = new Date(signature.created_at).getTime();
-          const serverTime = new Date(normalized.created_at).getTime();
-
-          return Math.abs(localTime - serverTime) <= 30000;
         });
+        
+        delete pendingMessageSignaturesRef.current[pendingId];
 
-        if (pendingIndex >= 0) {
-          const pendingId = prev[pendingIndex].id;
-          setPendingMessageIds((pending) => {
-            const updated = new Set(pending);
-            updated.delete(pendingId);
-            return updated;
-          });
-          delete pendingMessageSignaturesRef.current[pendingId];
-
-          const updated = [...prev];
-          updated[pendingIndex] = { ...updated[pendingIndex], ...normalized };
-          return updated.sort(
-            (left, right) =>
-              new Date(left.created_at).getTime() -
-              new Date(right.created_at).getTime(),
-          );
-        }
-
-        return [...prev, normalized].sort(
+        const updated = [...prev];
+        updated[pendingIndex] = { ...updated[pendingIndex], ...normalized };
+        return updated.sort(
           (left, right) =>
             new Date(left.created_at).getTime() -
             new Date(right.created_at).getTime(),
         );
-      });
-
-      if (normalized.id > 0 && room_id) {
-        dispatch(
-          setRoomLastMessage({
-            roomId: Number(room_id),
-            last_message: {
-              id: normalized.id,
-              text: normalized.text,
-              type: normalized.type,
-              sender: normalized.sender,
-              created_at: normalized.created_at,
-            },
-          }),
-        );
       }
-    },
-    [normalizeMessage, pendingMessageIds, dispatch, room_id],
-  );
+
+      return [...prev, normalized].sort(
+        (left, right) =>
+          new Date(left.created_at).getTime() -
+          new Date(right.created_at).getTime(),
+      );
+    });
+
+    if (normalized.id > 0 && room_id) {
+      dispatch(
+        setRoomLastMessage({
+          roomId: Number(room_id),
+          last_message: {
+            id: normalized.id,
+            text: normalized.text,
+            type: normalized.type,
+            sender: normalized.sender,
+            created_at: normalized.created_at,
+          },
+        }),
+      );
+    }
+  },
+  [normalizeMessage, dispatch, room_id],
+);
 
   const updateMessageReads = useCallback(
     (messageId: number, user: MembarData) => {
       setMessages((prev) =>
         prev.map((msg) => {
           if (msg.id !== messageId) return msg;
-
           const hasReader = msg.reads?.some((read) => read.user.id === user.id);
           if (hasReader) return msg;
-
           return {
             ...msg,
             reads: [
@@ -483,7 +498,6 @@ const ChatRoom: React.FC = () => {
       switch (event.type) {
         case "message":
           upsertMessage(event.message);
-
           if (room_id) {
             dispatch(
               setRoomLastMessage({
@@ -498,7 +512,6 @@ const ChatRoom: React.FC = () => {
               }),
             );
           }
-
           if (!calculateIsMy(event.message, selfUserId)) {
             const id = event.message.id;
             if (!readSentRef.current.has(id)) {
@@ -507,11 +520,9 @@ const ChatRoom: React.FC = () => {
             }
           }
           break;
-
         case "read":
           updateMessageReads(event.message_id, event.user);
           break;
-
         case "typing": {
           clearTypingTimer(event.user_id.id);
           if (event.is_typing) {
@@ -526,31 +537,20 @@ const ChatRoom: React.FC = () => {
           }
           break;
         }
-
         case "deleted":
           markMessageDeleted(event.message_id);
           break;
-
         case "updated":
           upsertMessage(event.message);
           break;
-
         case "error":
           setSendError(event.detail);
           break;
-
         default:
           break;
       }
     },
-    [
-      clearTypingTimer,
-      markMessageDeleted,
-      reportTypingUser,
-      selfUserId,
-      updateMessageReads,
-      upsertMessage,
-    ],
+    [clearTypingTimer, markMessageDeleted, reportTypingUser, selfUserId, updateMessageReads, upsertMessage, dispatch, room_id],
   );
 
   const {
@@ -562,7 +562,7 @@ const ChatRoom: React.FC = () => {
     sendRead,
     sendDelete,
     sendUpdate,
-    sendFileId: socketSendFileId,
+    sendMultipleFiles,
   } = useChatWebSocket(room_id, handleServerEvent);
 
   sendReadRef.current = sendRead;
@@ -579,14 +579,13 @@ const ChatRoom: React.FC = () => {
     } catch (error) {
       console.error(error);
     }
-  }, [room_id]);
+  }, [room_id, dispatch]);
 
   const fetchMessages = useCallback(async () => {
     if (!room_id) return;
 
     try {
       setLoadingMessages(true);
-
       oldestMessageIdRef.current = null;
       lastFetchedOldestIdRef.current = null;
       setHasMoreUp(false);
@@ -626,31 +625,84 @@ const ChatRoom: React.FC = () => {
     }
   }, [room_id, normalizeMessage]);
 
-  const handleDownload = async (fileUrl: string) => {
-    if (!fileUrl) {
-      toast.error("Fayl manzili topilmadi");
-      return;
-    }
+  const handleDownload = async (fileUrl: string, fileName?: string) => {
+    if (!fileUrl) return; // Hech qanday xabar yo'q
+
+    const baseUrl = "https://chat.m-gaz.uz";
+    const fullUrl = fileUrl.startsWith("http") ? fileUrl : `${baseUrl}${fileUrl}`;
+    const finalFileName = fileName || extractFileNameFromUrl(fileUrl);
+
     try {
-      const response = await fetch(`https://chat.m-gaz.uz${fileUrl}`);
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = fileUrl.split(".")[1];
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
-      } else {
-        throw new Error("Network response was not ok");
-      }
+      toast.info("Fayl yuklanmoqda...");
+      const response = await fetch(fullUrl);
+      if (!response.ok) throw new Error("Faylni yuklab bo'lmadi");
+
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = finalFileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(downloadUrl);
+      toast.success("Fayl yuklab olindi");
     } catch (error) {
-      console.log(error);
+      console.error(error);
       toast.error("Faylni yuklab olishda xatolik yuz berdi");
+      window.open(fullUrl, "_blank");
     }
   };
+
+  // Upload multiple files to server
+  const uploadMultipleFiles = useCallback(async (files: File[]): Promise<number[]> => {
+    const fileIds: number[] = [];
+    
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const attachment = attachments.find(a => a.file === file);
+      
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const response = await axiosAPI.post("upload/", formData, {
+          headers: { "Content-Type": "multipart/form-data" },
+          onUploadProgress: (event) => {
+            if (event.total && attachment) {
+              const progress = Math.round((event.loaded / event.total) * 100);
+              setAttachments(prev => prev.map(a => 
+                a.id === attachment.id ? { ...a, uploadProgress: progress } : a
+              ));
+            }
+          },
+        });
+
+        const fileId = response.data?.id ?? response.data?.file_id ?? null;
+        if (fileId == null) {
+          throw new Error("Upload response did not return a file ID.");
+        }
+        
+        fileIds.push(fileId);
+        
+        if (attachment) {
+          setAttachments(prev => prev.map(a => 
+            a.id === attachment.id ? { ...a, uploadProgress: 100 } : a
+          ));
+        }
+      } catch (error) {
+        console.error(`Failed to upload file: ${file.name}`, error);
+        if (attachment) {
+          setAttachments(prev => prev.map(a => 
+            a.id === attachment.id ? { ...a, error: "Yuklab bo'lmadi" } : a
+          ));
+        }
+        throw error;
+      }
+    }
+    
+    return fileIds;
+  }, [attachments]);
 
   useEffect(() => {
     if (room_id) {
@@ -661,29 +713,26 @@ const ChatRoom: React.FC = () => {
         setEditingMessageId(null);
         setEditingText("");
         setSendError(null);
+        setAttachments([]);
       });
       readSentRef.current.clear();
       previousLastMessageId.current = null;
     }
     setFilePreview("");
+    setPreviewFileUrl("");
   }, [room_id, fetchRoomData, fetchMessages]);
 
   useEffect(() => {
     const lastMessageId = messages[messages.length - 1]?.id ?? null;
     if (lastMessageId == null) return;
-
     if (previousLastMessageId.current !== lastMessageId) {
       previousLastMessageId.current = lastMessageId;
-      messagesEndRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "end",
-      });
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     }
   }, [messages]);
 
   const loadOlderMessages = useCallback(async () => {
     const beforeId = oldestMessageIdRef.current;
-
     if (!beforeId) return;
     if (isLoadingOlderMessagesRef.current) return;
     if (lastFetchedOldestIdRef.current === beforeId) return;
@@ -735,7 +784,6 @@ const ChatRoom: React.FC = () => {
                 new Date(b.created_at).getTime(),
             );
           });
-
           oldestMessageIdRef.current = pagination?.first_id ?? null;
           setHasMoreUp(Boolean(pagination?.has_more_up));
         } else {
@@ -757,10 +805,8 @@ const ChatRoom: React.FC = () => {
     if (scrollSnapshotRef.current && chatMessagesRef.current) {
       const container = chatMessagesRef.current;
       const { scrollHeight, scrollTop } = scrollSnapshotRef.current;
-
       const newScrollHeight = container.scrollHeight;
       const heightDifference = newScrollHeight - scrollHeight;
-
       container.scrollTop = scrollTop + heightDifference;
       scrollSnapshotRef.current = null;
     }
@@ -769,20 +815,10 @@ const ChatRoom: React.FC = () => {
   const handleScroll = useCallback(() => {
     const container = chatMessagesRef.current;
     if (!container || !initialLoadCompleteRef.current) return;
-
-    if (scrollTimeoutRef.current) {
-      clearTimeout(scrollTimeoutRef.current);
-    }
-
+    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
     scrollTimeoutRef.current = setTimeout(() => {
       const isNearTop = container.scrollTop <= 80;
-
-      if (
-        isNearTop &&
-        hasMoreUp &&
-        oldestMessageIdRef.current !== null &&
-        !isLoadingOlderMessagesRef.current
-      ) {
+      if (isNearTop && hasMoreUp && oldestMessageIdRef.current !== null && !isLoadingOlderMessagesRef.current) {
         loadOlderMessages();
       }
     }, 150);
@@ -790,16 +826,12 @@ const ChatRoom: React.FC = () => {
 
   useEffect(() => {
     return () => {
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
     };
   }, []);
 
   useEffect(() => {
-    const handler = setTimeout(() => {
-      setSearchQuery(searchInput);
-    }, 300);
+    const handler = setTimeout(() => setSearchQuery(searchInput), 300);
     return () => clearTimeout(handler);
   }, [searchInput]);
 
@@ -829,10 +861,7 @@ const ChatRoom: React.FC = () => {
       const activeId = matchedMessages[currentMatchIndex].id;
       const element = document.getElementById(`msg-${activeId}`);
       if (element) {
-        element.scrollIntoView({
-          behavior: "smooth",
-          block: "center",
-        });
+        element.scrollIntoView({ behavior: "smooth", block: "center" });
       }
     }
   }, [currentMatchIndex, matchedMessages]);
@@ -860,22 +889,16 @@ const ChatRoom: React.FC = () => {
 
   const renderHighlightedText = useCallback(
     (text: string, query: string, isActive: boolean) => {
-      if (!query.trim() || text === "Xabar o'chirildi") {
-        return text;
-      }
+      if (!query.trim() || text === "Xabar o'chirildi") return text;
       const escapedQuery = query.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
       const regex = new RegExp(`(${escapedQuery})`, "gi");
       const parts = text.split(regex);
-
       return parts.map((part, idx) => {
         const isMatch = part.toLowerCase() === query.toLowerCase();
         return isMatch ? (
           <mark
             key={idx}
-            className={clsx(
-              styless.highlight,
-              isActive && styless.highlight_active,
-            )}
+            className={clsx(styless.highlight, isActive && styless.highlight_active)}
           >
             {part}
           </mark>
@@ -892,33 +915,20 @@ const ChatRoom: React.FC = () => {
     const unreadIds = messages
       .filter(
         (msg) =>
-          !msg.reads?.some(
-            (read) => String(read.user.id) === String(selfUserId),
-          ) &&
+          !msg.reads?.some((read) => String(read.user.id) === String(selfUserId)) &&
           !readSentRef.current.has(msg.id) &&
           !pendingMessageIds.has(msg.id),
       )
       .map((msg) => msg.id);
 
     if (unreadIds.length > 0) {
-      dispatch(
-        updateRoomUnreadCount({ roomId: Number(room_id), unread_count: 0 }),
-      );
+      dispatch(updateRoomUnreadCount({ roomId: Number(room_id), unread_count: 0 }));
     }
-
     unreadIds.forEach((id) => {
       sendRead(id);
       readSentRef.current.add(id);
     });
-  }, [
-    dispatch,
-    isConnected,
-    messages,
-    room_id,
-    sendRead,
-    selfUserId,
-    pendingMessageIds,
-  ]);
+  }, [dispatch, isConnected, messages, room_id, sendRead, selfUserId, pendingMessageIds]);
 
   const handleInputChange = useCallback(
     (value: string) => {
@@ -937,154 +947,149 @@ const ChatRoom: React.FC = () => {
   }, [socketSendTyping]);
 
   const handleAttachmentSelected = useCallback(
-    (file: File | null, error?: string) => {
+    (files: File[] | null, error?: string) => {
       if (error) {
         setSendError(error);
         return;
       }
+      if (!files || files.length === 0) return;
       setSendError(null);
-      setSelectedFile(file);
+      
+      const newAttachments: AttachmentFile[] = files.map(file => ({
+        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        file,
+        previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
+        uploadProgress: 0,
+      }));
+      
+      setAttachments(prev => [...prev, ...newAttachments]);
     },
     [],
   );
 
-  const handleAttachmentClear = useCallback(() => {
-    setSelectedFile(null);
+  const handleAttachmentRemove = useCallback((fileId: string) => {
+    setAttachments(prev => {
+      const attachment = prev.find(a => a.id === fileId);
+      if (attachment?.previewUrl) {
+        URL.revokeObjectURL(attachment.previewUrl);
+      }
+      return prev.filter(a => a.id !== fileId);
+    });
   }, []);
 
+  const handleAttachmentClear = useCallback(() => {
+    attachments.forEach(attachment => {
+      if (attachment.previewUrl) {
+        URL.revokeObjectURL(attachment.previewUrl);
+      }
+    });
+    setAttachments([]);
+  }, [attachments]);
+
   const handleSendMessage = useCallback(async () => {
-    if (!message.trim() && !selectedFile) return;
+    const hasText = message.trim().length > 0;
+    const hasFiles = attachments.length > 0;
+    
+    if (!hasText && !hasFiles) return;
+    if (isUploading) {
+      toast.info("Fayllar yuklanmoqda, biroz kuting...");
+      return;
+    }
 
     setSendError(null);
+    setIsUploading(true);
 
     const tempId = -Date.now();
     const createdAt = new Date().toISOString();
+    const optimisticText = hasText ? message.trim() : (hasFiles ? `${attachments.length} ta fayl` : "");
 
-    let optimisticText = "";
-    if (selectedFile && message.trim()) {
-      optimisticText = message.trim();
-    } else if (selectedFile) {
-      optimisticText = selectedFile.name;
-    } else {
-      optimisticText = message.trim();
-    }
-
+    // Optimistic message - files[].url ni bo'sh qoldiramiz
     const optimisticMessage: MessageData = {
       id: tempId,
-      type: selectedFile ? "file" : "text",
+      type: hasFiles ? "file" : "text",
       text: optimisticText,
       is_my: true,
-      sender: {
-        id: selfUserId || 0,
-        full_name: "You",
-        avatar: null,
-      },
+      sender: { id: selfUserId || 0, full_name: "You", avatar: null },
       reads: [],
       is_edited: false,
-      file: selectedFile,
+      files: hasFiles ? attachments.map(a => ({
+        id: 0,
+        url: "", // 🔥 BO'SH - serverdan kelganda to'ldiriladi
+        name: a.file.name,
+        size: a.file.size,
+      })) : [],
+      file: null,
       file_url: null,
       reply_to: null,
       created_at: createdAt,
     };
 
-    upsertMessage(optimisticMessage);
-
+    // Signature saqlash
     pendingMessageSignaturesRef.current[tempId] = {
       text: optimisticText.trim(),
       created_at: createdAt,
+      fileIds: [],
     };
-
+    
     setPendingMessageIds((prev) => new Set([...prev, tempId]));
+    upsertMessage(optimisticMessage);
 
-    let wasSent = false;
-    if (selectedFile) {
-      setUploadProgress(0);
-
-      try {
-        if (!isConnected) {
-          throw new Error("Realtime connection is not available.");
-        }
-
-        const formData = new FormData();
-        formData.append("file", selectedFile);
-
-        const response = await axiosAPI.post("upload/", formData, {
-          headers: {
-            "Content-Type": "multipart/form-data",
-          },
-          onUploadProgress: (event) => {
-            if (event.total) {
-              setUploadProgress(Math.round((event.loaded / event.total) * 100));
-            }
-          },
-        });
-
-        const fileId = response.data?.id ?? response.data?.file_id ?? null;
-        if (fileId == null) {
-          throw new Error("Upload response did not return a file ID.");
-        }
-
-        wasSent = socketSendFileId(fileId, message.trim() || undefined);
-        setUploadProgress((prev) => (wasSent ? 100 : prev));
-      } catch (error) {
-        console.error("File upload failed", error);
-        wasSent = false;
+    let fileIds: number[] = [];
+    
+    try {
+      if (hasFiles) {
+        fileIds = await uploadMultipleFiles(attachments.map(a => a.file));
       }
-    } else {
-      wasSent = socketSendMessage(message);
-    }
-
-    if (!wasSent) {
-      setSendError(
-        "Xabarni jo'nata olmadik. Iltimos, tarmoqqa ulanganingizni tekshiring.",
-      );
+      
+      if (pendingMessageSignaturesRef.current[tempId]) {
+        pendingMessageSignaturesRef.current[tempId].fileIds = fileIds;
+      }
+      
+      let wasSent = false;
+      if (hasFiles && fileIds.length > 0) {
+        wasSent = sendMultipleFiles(fileIds, hasText ? message.trim() : undefined);
+      } else if (hasText) {
+        wasSent = socketSendMessage(message);
+      }
+      
+      if (!wasSent || (!isConnected && !hasFiles)) {
+        throw new Error("Xabarni jo'natish uchun ulanish mavjud emas");
+      }
+      
+      setMessage("");
+      handleAttachmentClear();
+      socketSendTyping(false);
+      
+    } catch (error) {
+      console.error("Send message failed:", error);
+      setSendError(error instanceof Error ? error.message : "Xabarni jo'nata olmadik");
       setPendingMessageIds((prev) => {
         const updated = new Set(prev);
         updated.delete(tempId);
         return updated;
       });
       delete pendingMessageSignaturesRef.current[tempId];
-      setUploadProgress(null);
-      return;
+    } finally {
+      setIsUploading(false);
     }
+  }, [message, attachments, selfUserId, socketSendMessage, sendMultipleFiles, upsertMessage, isConnected, uploadMultipleFiles, handleAttachmentClear, socketSendTyping]);
 
-    setMessage("");
-    setSelectedFile(null);
-    setUploadProgress(null);
-    socketSendTyping(false);
-  }, [
-    message,
-    selectedFile,
-    selfUserId,
-    socketSendMessage,
-    socketSendTyping,
-    socketSendFileId,
-    upsertMessage,
-    isConnected,
-  ]);
-
-  // Voice message direct send function
   const handleSendVoiceMessage = useCallback(
     async (voiceFile: File) => {
       if (!voiceFile) return;
-
-      setSendError(null);
-
+      
       const tempId = -Date.now();
       const createdAt = new Date().toISOString();
 
       const optimisticMessage: MessageData = {
         id: tempId,
         type: "file",
-        text: voiceFile.name,
+        text: "Ovozli xabar",
         is_my: true,
-        sender: {
-          id: selfUserId || 0,
-          full_name: "You",
-          avatar: null,
-        },
+        sender: { id: selfUserId || 0, full_name: "You", avatar: null },
         reads: [],
         is_edited: false,
+        files: [{ id: 0, url: "", name: voiceFile.name, size: voiceFile.size }],
         file: voiceFile,
         file_url: null,
         reply_to: null,
@@ -1092,48 +1097,19 @@ const ChatRoom: React.FC = () => {
       };
 
       upsertMessage(optimisticMessage);
-
-      pendingMessageSignaturesRef.current[tempId] = {
-        text: voiceFile.name.trim(),
-        created_at: createdAt,
-      };
-
       setPendingMessageIds((prev) => new Set([...prev, tempId]));
 
-      setUploadProgress(0);
-
       try {
-        if (!isConnected) {
-          throw new Error("Realtime connection is not available.");
-        }
-
         const formData = new FormData();
         formData.append("file", voiceFile);
-
-        const response = await axiosAPI.post("upload/", formData, {
-          headers: {
-            "Content-Type": "multipart/form-data",
-          },
-          onUploadProgress: (event) => {
-            if (event.total) {
-              setUploadProgress(Math.round((event.loaded / event.total) * 100));
-            }
-          },
-        });
-
+        const response = await axiosAPI.post("upload/", formData);
         const fileId = response.data?.id ?? response.data?.file_id ?? null;
-        if (fileId == null) {
-          throw new Error("Upload response did not return a file ID.");
-        }
-
-        const wasSent = socketSendFileId(fileId);
-        setUploadProgress((prev) => (wasSent ? 100 : prev));
-
-        if (!wasSent) {
-          throw new Error("Failed to send voice message via socket");
-        }
-
-        setUploadProgress(null);
+        
+        if (fileId == null) throw new Error("Upload response did not return a file ID.");
+        
+        const wasSent = sendMultipleFiles([fileId]);
+        if (!wasSent) throw new Error("Failed to send voice message via socket");
+        
       } catch (error) {
         console.error("Voice upload failed", error);
         setSendError("Ovozli xabar yuborilmadi");
@@ -1143,10 +1119,9 @@ const ChatRoom: React.FC = () => {
           return updated;
         });
         delete pendingMessageSignaturesRef.current[tempId];
-        setUploadProgress(null);
       }
     },
-    [selfUserId, isConnected, socketSendFileId, upsertMessage],
+    [selfUserId, sendMultipleFiles, upsertMessage],
   );
 
   const handleDelete = (messageId: number) => {
@@ -1178,11 +1153,7 @@ const ChatRoom: React.FC = () => {
 
   const roomTitle = useMemo(() => {
     if (!chatData) return "Chat";
-
-    if (chatData.type === "group") {
-      return chatData.name;
-    }
-
+    if (chatData.type === "group") return chatData.name;
     const companion = (chatData.members as any[])?.find(
       (member) => member.user_id !== currentUserInfo.id,
     ) as any;
@@ -1201,21 +1172,19 @@ const ChatRoom: React.FC = () => {
     if (status === "auth_failed") return "Token yaroqsiz yoki yo'q.";
     if (status === "forbidden") return "Siz bu xonada a'zo emassiz.";
     if (status === "error") return lastError || "Ulanishda xato yuz berdi.";
-
-    if (chatData?.type === "group") {
-      return `${chatData?.members?.length || 0} a'zo`;
-    }
-
-    const companion = (chatData?.members as any[])?.find(
-      (member) => !member.is_me,
-    ) as any;
+    if (chatData?.type === "group") return `${chatData?.members?.length || 0} a'zo`;
+    const companion = (chatData?.members as any[])?.find((member) => !member.is_me) as any;
     if (!companion) return "Offline";
     return companion.is_online ? "Online" : "Offline";
   }, [chatData, lastError, status]);
 
   const headerStatus = typingLabel || statusLabel;
-
   const navigate = useNavigate();
+
+  // Calculate total upload progress for ChatInput
+  const totalUploadProgress = attachments.length > 0
+    ? attachments.reduce((sum, a) => sum + a.uploadProgress, 0) / attachments.length
+    : null;
 
   return (
     <>
@@ -1223,11 +1192,7 @@ const ChatRoom: React.FC = () => {
         <header className={styless.chat_header}>
           {isSearchOpen ? (
             <div className={styless.search_header_container}>
-              <button
-                className={styless.search_close_btn}
-                onClick={handleCloseSearch}
-                title="Qidiruvni yopish"
-              >
+              <button className={styless.search_close_btn} onClick={handleCloseSearch} title="Qidiruvni yopish">
                 <ArrowLeft size={20} />
               </button>
               <div className={styless.search_input_wrapper}>
@@ -1245,18 +1210,10 @@ const ChatRoom: React.FC = () => {
                   <span className={styless.search_count}>
                     {currentMatchIndex + 1} / {matchedMessages.length}
                   </span>
-                  <button
-                    onClick={handlePrevMatch}
-                    className={styless.search_nav_btn}
-                    title="Oldingi"
-                  >
+                  <button onClick={handlePrevMatch} className={styless.search_nav_btn} title="Oldingi">
                     <ChevronUp size={20} />
                   </button>
-                  <button
-                    onClick={handleNextMatch}
-                    className={styless.search_nav_btn}
-                    title="Keyingi"
-                  >
+                  <button onClick={handleNextMatch} className={styless.search_nav_btn} title="Keyingi">
                     <ChevronDown size={20} />
                   </button>
                 </div>
@@ -1278,7 +1235,6 @@ const ChatRoom: React.FC = () => {
                   <ArrowLeft />
                 </button>
                 <div className={styless.chat_avatar}>{roomTitle?.[0]}</div>
-
                 <div className={styless.chat_info}>
                   <h2>{roomTitle}</h2>
                   <span className={styless.chat_status}>
@@ -1293,15 +1249,11 @@ const ChatRoom: React.FC = () => {
                   </span>
                 </div>
               </div>
-
               <div className={styless.chat_header_actions}>
                 <button onClick={() => setIsSearchOpen(true)} title="Qidirish">
                   <Search size={20} />
                 </button>
-                <button
-                  onClick={() => setIsInfoModalOpen(true)}
-                  title="Guruh/Chat ma'lumotlari"
-                >
+                <button onClick={() => setIsInfoModalOpen(true)} title="Guruh/Chat ma'lumotlari">
                   <Info size={20} />
                 </button>
               </div>
@@ -1312,32 +1264,24 @@ const ChatRoom: React.FC = () => {
         {filePreview ? (
           <FilePreviewer
             file_url={`https://chat.m-gaz.uz${filePreview}`}
-            onClose={() => setFilePreview("")}
+            onClose={() => {
+              setFilePreview("");
+              setPreviewFileUrl("");
+            }}
           />
         ) : (
           <>
-            <div
-              className={styless.chat_messages}
-              ref={chatMessagesRef}
-              onScroll={handleScroll}
-            >
+            <div className={styless.chat_messages} ref={chatMessagesRef} onScroll={handleScroll}>
               {isLoadingOlderMessages && (
-                <div className={styless.loading_text}>
-                  Eski xabarlar yuklanmoqda...
-                </div>
+                <div className={styless.loading_text}>Eski xabarlar yuklanmoqda...</div>
               )}
-
               {hasMoreUp && !isLoadingOlderMessages && (
                 <div className={styless.load_more_container}>
-                  <button
-                    className={styless.load_more_btn}
-                    onClick={loadOlderMessages}
-                  >
+                  <button className={styless.load_more_btn} onClick={loadOlderMessages}>
                     Eski xabarlarni yuklash
                   </button>
                 </div>
               )}
-
               <div className={styless.messages_date}>
                 <span>Bugun</span>
               </div>
@@ -1348,94 +1292,71 @@ const ChatRoom: React.FC = () => {
                   id={`msg-${msg.id}`}
                   className={clsx(
                     styless.message_wrapper,
-                    msg.is_my
-                      ? styless.message_wrapper_me
-                      : styless.message_wrapper_other,
+                    msg.is_my ? styless.message_wrapper_me : styless.message_wrapper_other,
                   )}
                 >
                   <div
                     className={clsx(
                       styless.message,
                       msg.is_my ? styless.message_me : styless.message_other,
-                      msg.text === "Xabar o'chirildi" &&
-                        styless.message_deleted,
+                      msg.text === "Xabar o'chirildi" && styless.message_deleted,
                     )}
                   >
-                    {!msg.is_my && (
-                      <span className={styless.message_sender}>
-                        {msg.sender?.full_name}
-                      </span>
-                    )}
+                    {!msg.is_my && <span className={styless.message_sender}>{msg.sender?.full_name}</span>}
 
                     {editingMessageId === msg.id ? (
                       <div className={styless.message_edit_form}>
                         <textarea
                           value={editingText}
-                          onChange={(event) =>
-                            setEditingText(event.target.value)
-                          }
+                          onChange={(event) => setEditingText(event.target.value)}
                           className={styless.message_edit_textarea}
                           rows={2}
                         />
                         <div className={styless.message_actions}>
-                          <button
-                            className={styless.message_action_button}
-                            type="button"
-                            onClick={handleEditSave}
-                          >
+                          <button className={styless.message_action_button} type="button" onClick={handleEditSave}>
                             <Check size={16} />
                           </button>
-                          <button
-                            className={styless.message_action_button}
-                            type="button"
-                            onClick={handleEditCancel}
-                          >
+                          <button className={styless.message_action_button} type="button" onClick={handleEditCancel}>
                             <Trash2 size={16} />
                           </button>
                         </div>
                       </div>
                     ) : (
                       <>
-                        {msg.type === "file" ||
-                        (msg.files && msg.files.length > 0) ? (
+                        {(msg.type === "file" || (msg.files && msg.files.length > 0)) ? (
                           <div className={styless.message_content}>
-                            {/* Multiple files list - vertical layout */}
                             {msg.files && msg.files.length > 0 && (
                               <FileList
-                                files={msg.files.map((file) => ({
-                                  ...file,
-                                }))}
+                                files={msg.files}
                                 onPreview={(fileUrl) => {
-                                  setFilePreview(fileUrl);
+                                  console.log(fileUrl)
+                                  if (fileUrl) {
+                                    // Agar URL relative bo'lsa, to'liq qilamiz
+                                    const fullUrl = fileUrl.startsWith('http') ? fileUrl : `https://chat.m-gaz.uz${fileUrl}`;
+                                    setPreviewFileUrl(fullUrl);
+                                    setFilePreview(fileUrl);
+                                  }
                                 }}
-                                onDownload={(fileUrl) => {
-                                  handleDownload(fileUrl);
+                                onDownload={(fileUrl, fileName) => {
+                                  if (fileUrl) {
+                                    handleDownload(fileUrl, fileName);
+                                  }
                                 }}
                                 isMyMessage={msg.is_my}
                               />
                             )}
-
-                            {/* Text content if exists */}
                             {msg.text && msg.text.trim() !== "" && (
                               <div className={styless.message_text_content}>
                                 {renderHighlightedText(
                                   msg.text,
                                   searchQuery,
-                                  matchedMessages[currentMatchIndex]?.id ===
-                                    msg.id,
+                                  matchedMessages[currentMatchIndex]?.id === msg.id,
                                 )}
                               </div>
                             )}
-
                             <div className={styless.message_footer}>
-                              <span className={styless.message_time}>
-                                {formatDateTime(msg.created_at)}
-                              </span>
-                              {msg.is_edited && (
-                                <span className={styless.message_edited}>
-                                  (tahrirlandi)
-                                </span>
-                              )}
+                              <span className={styless.message_time}>{formatDateTime(msg.created_at)}</span>
+                              {msg.is_edited && <span className={styless.message_edited}>(tahrirlandi)</span>}
                               {msg.is_my && (
                                 <MessageStatusIcon
                                   status={getMessageStatus(
@@ -1448,25 +1369,17 @@ const ChatRoom: React.FC = () => {
                             </div>
                           </div>
                         ) : (
-                          // Text only message (same as before)
                           <>
                             <p className={styless.message_text}>
                               {renderHighlightedText(
                                 msg.text,
                                 searchQuery,
-                                matchedMessages[currentMatchIndex]?.id ===
-                                  msg.id,
+                                matchedMessages[currentMatchIndex]?.id === msg.id,
                               )}
                             </p>
                             <div className={styless.message_footer}>
-                              <span className={styless.message_time}>
-                                {formatDateTime(msg.created_at)}
-                              </span>
-                              {msg.is_edited && (
-                                <span className={styless.message_edited}>
-                                  (tahrirlandi)
-                                </span>
-                              )}
+                              <span className={styless.message_time}>{formatDateTime(msg.created_at)}</span>
+                              {msg.is_edited && <span className={styless.message_edited}>(tahrirlandi)</span>}
                               {msg.is_my && (
                                 <MessageStatusIcon
                                   status={getMessageStatus(
@@ -1486,24 +1399,19 @@ const ChatRoom: React.FC = () => {
                       editingMessageId !== msg.id &&
                       msg.text !== "Xabar o'chirildi" &&
                       (() => {
-                        // Check if it's a voice message
                         const fileName = extractFileName(msg);
                         const isVoice =
                           fileName === "Ovozli xabar" ||
                           msg.file_url?.endsWith(".webm") ||
                           msg.file_url?.endsWith(".mp3") ||
                           msg.file_url?.endsWith(".wav");
-
-                        // Don't show edit button for voice messages
                         return (
                           <div className={styless.message_actions}>
                             {!isVoice && (
                               <button
                                 className={styless.message_action_button}
                                 type="button"
-                                onClick={() =>
-                                  handleEditStart(msg.id, msg.text)
-                                }
+                                onClick={() => handleEditStart(msg.id, msg.text)}
                               >
                                 <Edit3 size={16} />
                               </button>
@@ -1522,21 +1430,20 @@ const ChatRoom: React.FC = () => {
                 </div>
               ))}
 
-              {loadingMessages && (
-                <div className={styless.loading_text}>Yuklanmoqda...</div>
-              )}
+              {loadingMessages && <div className={styless.loading_text}>Yuklanmoqda...</div>}
               <div ref={messagesEndRef} />
             </div>
 
             <ChatInput
               message={message}
-              attachment={selectedFile}
-              uploadProgress={uploadProgress}
+              attachments={attachments}
+              uploadProgress={totalUploadProgress}
               onMessageChange={handleInputChange}
               onSendMessage={handleSendMessage}
               onBlur={handleInputBlur}
               onAttachmentSelected={handleAttachmentSelected}
               onAttachmentClear={handleAttachmentClear}
+              onAttachmentRemove={handleAttachmentRemove}
               onSendVoiceMessage={handleSendVoiceMessage}
             />
           </>

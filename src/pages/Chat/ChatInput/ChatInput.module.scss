@@ -244,3 +244,247 @@
     transform: scale(1.05);
   }
 }
+
+.attachments_preview {
+  padding: 12px;
+  border-bottom: 1px solid #e5e7eb;
+  background-color: #f9fafb;
+}
+
+.attachments_header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.attachments_count {
+  font-size: 12px;
+  font-weight: 500;
+  color: #6b7280;
+}
+
+.clear_all_btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background-color: transparent;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #ef4444;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
+    background-color: #fee2e2;
+    border-color: #fecaca;
+  }
+}
+
+.attachments_grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.attachment_item {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.image_preview_wrapper {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  border-radius: 8px;
+  overflow: hidden;
+  background-color: #f3f4f6;
+  border: 1px solid #e5e7eb;
+}
+
+.image_preview {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.image_preview_overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0,0,0,0.7), transparent);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 4px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.image_preview_wrapper:hover .image_preview_overlay {
+  opacity: 1;
+}
+
+.image_preview_name {
+  font-size: 8px;
+  color: white;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file_preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background-color: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  min-width: 180px;
+  max-width: 220px;
+}
+
+.file_icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background-color: #f3f4f6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7280;
+}
+
+.file_info {
+  flex: 1;
+  min-width: 0;
+}
+
+.file_preview_name {
+  font-size: 12px;
+  font-weight: 500;
+  color: #1f2937;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file_size {
+  font-size: 10px;
+  color: #9ca3af;
+}
+
+.remove_attachment_btn {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background-color: white;
+  border: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: #6b7280;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+
+  &:hover {
+    background-color: #fee2e2;
+    border-color: #fecaca;
+    color: #ef4444;
+    transform: scale(1.1);
+  }
+}
+
+.global_upload_progress {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #e5e7eb;
+  position: relative;
+  height: 4px;
+  background-color: #e5e7eb;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.global_upload_progress_bar {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.global_upload_progress_text {
+  position: absolute;
+  right: 0;
+  top: -20px;
+  font-size: 10px;
+  color: #3b82f6;
+}
+
+.drag_overlay {
+  position: absolute;
+  inset: 0;
+  background-color: rgba(59, 130, 246, 0.1);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  border-radius: 12px;
+  border: 2px dashed #3b82f6;
+}
+
+.drag_content {
+  text-align: center;
+  color: #3b82f6;
+  
+  p {
+    margin: 8px 0 4px;
+    font-weight: 500;
+  }
+  
+  small {
+    font-size: 11px;
+    color: #6b7280;
+  }
+}
+
+.chat_input_container {
+  position: relative;
+  background-color: white;
+  border-top: 1px solid #e5e7eb;
+  transition: all 0.2s ease;
+}
+
+.dragging {
+  background-color: rgba(59, 130, 246, 0.05);
+}
+
+// Responsive
+@media (max-width: 640px) {
+  .attachments_grid {
+    gap: 6px;
+  }
+  
+  .file_preview {
+    min-width: 150px;
+    max-width: 180px;
+    padding: 6px 10px;
+  }
+  
+  .image_preview_wrapper {
+    width: 70px;
+    height: 70px;
+  }
+}

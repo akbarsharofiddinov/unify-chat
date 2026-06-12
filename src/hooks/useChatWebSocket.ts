@@ -16,6 +16,7 @@ interface SendMessagePayload {
   text?: string;
   file?: File | Blob | ArrayBuffer;
   file_id?: number;
+  file_ids?: number[]; 
   msg_type: ClientMessageType;
   reply_to: number | null;
 }
@@ -165,11 +166,19 @@ export function useChatWebSocket(
     }
 
     if (payload.type === "message" && payload.msg_type === "file") {
+      
+      if (payload.file_ids && payload.file_ids.length > 0) {
+        socket.send(JSON.stringify(payload));
+        return true;
+      }
+
+      
       if (payload.file_id != null) {
         socket.send(JSON.stringify(payload));
         return true;
       }
 
+      
       if (payload.file) {
         const metadata = {
           type: payload.type,
@@ -212,6 +221,33 @@ export function useChatWebSocket(
       });
     },
     [sendPayload],
+  );
+
+  
+  const sendMultipleFiles = useCallback(
+    (fileIds: number[], text?: string, replyTo: number | null = null): boolean => {
+      if (!fileIds || fileIds.length === 0) {
+        console.error("No file IDs provided");
+        return false;
+      }
+
+      return sendPayload({
+        type: "message",
+        msg_type: "file",
+        text: text?.trim() || undefined,
+        file_ids: fileIds,
+        reply_to: replyTo,
+      });
+    },
+    [sendPayload],
+  );
+
+  
+  const sendFileId = useCallback(
+    (fileId: number, text?: string, replyTo: number | null = null): boolean => {
+      return sendMultipleFiles([fileId], text, replyTo);
+    },
+    [sendMultipleFiles],
   );
 
   const sendRead = useCallback(
@@ -279,18 +315,15 @@ export function useChatWebSocket(
         };
 
         const separator = "\n\n";
-        // Combine metadata and file into a single Blob so server receives both together
         const blob = new Blob([JSON.stringify(metadata), separator, file]);
 
         const total = (file as any).size ?? (blob as Blob).size;
 
-        // Send the combined blob in one shot
         socket.send(blob);
 
-        // Approximate progress using bufferedAmount
         if (onProgress) {
           const start = Date.now();
-          const maxWait = 120000; // 2 minutes cap
+          const maxWait = 120000;
           const interval = 200;
 
           const tick = () => {
@@ -309,7 +342,6 @@ export function useChatWebSocket(
             }
           };
 
-          // start polling
           setTimeout(tick, 50);
         }
 
@@ -410,7 +442,7 @@ export function useChatWebSocket(
         }
       };
     },
-    [cleanupSocket, handleServerMessage, scheduleReconnect],
+    [cleanupSocket, handleServerMessage, scheduleReconnect, setStatusSafe],
   );
 
   const connectWebSocketRef = useRef<((room: string) => void) | null>(null);
@@ -435,23 +467,11 @@ export function useChatWebSocket(
       return;
     }
 
-  connectWebSocketRef.current?.(roomId);
+    connectWebSocketRef.current?.(roomId);
     return () => {
       cleanupSocket();
     };
-  }, [roomId, cleanupSocket, setStatusSafe]);
-
-  const sendFileId = useCallback(
-  (fileId: number, text?: string, replyTo: number | null = null) =>
-    sendPayload({
-      type: "message",
-      msg_type: "file",
-      text: text?.trim() || undefined,  // Agar matn bo'lsa qo'shadi
-      file_id: fileId,
-      reply_to: replyTo,
-    }),
-  [sendPayload],
-);
+  }, [roomId, cleanupSocket, setStatusSafe, connectWebSocket]);
 
   return {
     status,
@@ -463,7 +483,8 @@ export function useChatWebSocket(
     sendDelete,
     sendUpdate,
     sendFile,
-    sendFileId,
+    sendFileId,        
+    sendMultipleFiles, 
   };
 }
 
